@@ -18,7 +18,7 @@ export const TabBar: React.FC = () => {
   const counts: Record<TabFilter, number> = {
     all: feedItems.length,
     filings: feedItems.filter((i) => i.type === 'filing').length,
-    news: feedItems.filter((i) => i.type === 'news' || i.type === 'capital_iq').length,
+    news: feedItems.filter((i) => i.type === 'news').length,
   };
 
   return (

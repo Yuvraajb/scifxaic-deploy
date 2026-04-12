@@ -72,6 +72,9 @@ export const useAppStore = create<AppStore>()(
                   ...item,
                   materiality: result.materiality,
                   summary: result.summary,
+                  immediate: result.immediate,
+                  notificationWorthy: result.notificationWorthy,
+                  sentiment: result.sentiment,
                   classifiedAt: new Date(),
                 }
               : item,
@@ -108,7 +111,7 @@ export function selectFilteredItems(
   return [...feedItems]
     .filter((item) => {
       if (activeTab === 'filings') return item.type === 'filing';
-      if (activeTab === 'news') return item.type === 'news' || item.type === 'capital_iq';
+      if (activeTab === 'news') return item.type === 'news';
       return true;
     })
     .sort((a, b) => {

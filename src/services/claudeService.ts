@@ -1,5 +1,5 @@
 import type { FeedItem, ClassificationResult } from '../types';
-import { CLAUDE_API_URL, CLAUDE_MODEL, CLASSIFICATION_DRAIN_INTERVAL_MS } from '../config/constants';
+import { CLAUDE_API_URL, CLAUDE_MODEL, CLASSIFICATION_DRAIN_INTERVAL_MS, getFastPathRule } from '../config/constants';
 import { cacheGet, cacheSet, hashKey } from '../utils/cache';
 
 interface QueueItem {
@@ -11,23 +11,42 @@ interface QueueItem {
 const queue: QueueItem[] = [];
 let drainTimer: ReturnType<typeof setInterval> | null = null;
 
-const SYSTEM_PROMPT = `You are a financial analyst assistant. Given a financial filing or news headline and snippet, classify the materiality level and write a one-line summary.
+const SYSTEM_PROMPT = `You are a financial analyst assistant specializing in real-time market intelligence.
 
-Materiality definitions:
-- High: Requires immediate attention — earnings restatement, merger/acquisition, guidance cut, CEO/CFO change, going concern, regulatory action, major litigation
-- Medium: Notable but not urgent — earnings beat/miss, new product launch, executive hire below C-suite, contract wins, analyst rating change
-- Low: Routine — scheduled annual/quarterly filing, minor operational update, boilerplate disclosure
+Given a financial news headline and snippet, return a JSON object with EXACTLY these fields:
 
-Return ONLY valid JSON with this exact shape:
-{"materiality":"High|Medium|Low","summary":"one concise sentence"}`;
+{
+  "materiality": "High" | "Medium" | "Low",
+  "summary": "one concise sentence (max 20 words)",
+  "immediate": true | false,
+  "notification_worthy": true | false,
+  "sentiment": "Bullish" | "Bearish" | "Neutral"
+}
 
-async function classifyItem(
+Definitions:
+- materiality:
+  • High — merger/acquisition, bankruptcy, earnings restatement, guidance cut/raise, CEO/CFO change, FDA decision, going concern, major litigation
+  • Medium — earnings beat/miss, analyst upgrade/downgrade, new product, executive hire below C-suite, contract win, dividend change
+  • Low — routine filing, press release, minor operational update, boilerplate disclosure
+
+- immediate: true if the news requires attention within the next trading session (price-moving, time-sensitive)
+- notification_worthy: true if an investor holding this stock should be proactively alerted (subset of immediate, but also includes major analyst calls)
+- sentiment: market impact on the stock — Bullish (positive), Bearish (negative), Neutral (no clear directional bias)
+
+Return ONLY the JSON object. No markdown, no explanation.`;
+
+async function classifyViaLLM(
   item: FeedItem,
   apiKey: string,
 ): Promise<ClassificationResult> {
   const cacheKey = await hashKey(item.title + item.rawSnippet);
   const cached = cacheGet<ClassificationResult>('clf', cacheKey);
   if (cached) return cached;
+
+  // Include Benzinga channels as additional context for the LLM
+  const channelContext = item.channels?.length
+    ? `\nBenzinga channels: ${item.channels.join(', ')}`
+    : '';
 
   const response = await fetch(CLAUDE_API_URL, {
     method: 'POST',
@@ -50,7 +69,7 @@ async function classifyItem(
       messages: [
         {
           role: 'user',
-          content: `Title: ${item.title}\nSnippet: ${item.rawSnippet}`,
+          content: `Title: ${item.title}\nSnippet: ${item.rawSnippet}${channelContext}`,
         },
       ],
     }),
@@ -64,17 +83,52 @@ async function classifyItem(
   const data = await response.json();
   const text: string = data.content?.[0]?.text ?? '{}';
 
-  // Extract JSON even if the model wraps it in markdown
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('Claude response did not contain JSON');
 
-  const result: ClassificationResult = JSON.parse(jsonMatch[0]);
-  if (!result.materiality || !result.summary) {
-    throw new Error('Claude response missing required fields');
+  const raw = JSON.parse(jsonMatch[0]);
+
+  const result: ClassificationResult = {
+    materiality: raw.materiality ?? 'Low',
+    summary: raw.summary ?? item.title,
+    immediate: Boolean(raw.immediate),
+    notificationWorthy: Boolean(raw.notification_worthy ?? raw.notificationWorthy),
+    sentiment: raw.sentiment ?? 'Neutral',
+  };
+
+  if (!['High', 'Medium', 'Low'].includes(result.materiality)) {
+    throw new Error(`Invalid materiality: ${result.materiality}`);
   }
 
   cacheSet('clf', cacheKey, result);
   return result;
+}
+
+/**
+ * Hybrid classification:
+ * 1. Check Benzinga channel fast-path rules first (no API call, ~instant)
+ * 2. Fall back to LLM for ambiguous / unlabeled items
+ */
+export async function classifyItem(
+  item: FeedItem,
+  apiKey: string,
+): Promise<ClassificationResult> {
+  // Fast-path: use Benzinga channel rules when available
+  if (item.channels?.length) {
+    const rule = getFastPathRule(item.channels);
+    if (rule) {
+      return {
+        materiality: rule.materiality,
+        summary: item.summary !== item.title ? item.summary : item.title,
+        immediate: rule.immediate,
+        notificationWorthy: rule.notificationWorthy,
+        sentiment: rule.sentiment,
+      };
+    }
+  }
+
+  // LLM path for everything else (SEC filings always go here)
+  return classifyViaLLM(item, apiKey);
 }
 
 export function enqueueClassification(item: FeedItem): Promise<ClassificationResult> {

@@ -5,7 +5,8 @@ export const EDGAR_FILING_TYPES = ['8-K', '10-K', '10-Q'] as const;
 
 export const EDGAR_SUBMISSIONS_URL = 'https://data.sec.gov/submissions/CIK';
 
-export const ALPACA_NEWS_URL = 'https://data.alpaca.markets/v1beta1/news';
+// Proxied via Vite dev server → https://api.benzinga.com/api/v2/news
+export const BENZINGA_NEWS_URL = '/api/benzinga/news';
 
 export const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 export const CLAUDE_MODEL = 'claude-sonnet-4-6';
@@ -26,3 +27,64 @@ export const MATERIALITY_ORDER: Record<string, number> = {
   Low: 2,
   Pending: 3,
 };
+
+/**
+ * Benzinga channel → fast-path classification rules.
+ * These channels are unambiguous enough that we don't need to call the LLM.
+ * The LLM will still be called for all other items.
+ */
+export interface FastPathRule {
+  materiality: 'High' | 'Medium' | 'Low';
+  immediate: boolean;
+  notificationWorthy: boolean;
+  sentiment: 'Bullish' | 'Bearish' | 'Neutral';
+}
+
+export const BENZINGA_CHANNEL_RULES: Record<string, FastPathRule> = {
+  // Definite High + Immediate
+  'M&A':          { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Mergers & Acquisitions': { materiality: 'High', immediate: true, notificationWorthy: true, sentiment: 'Neutral' },
+  'Bankruptcy':   { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Bearish'  },
+  'FDA':          { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Biotech':      { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Government':   { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Legal':        { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Bearish'  },
+  'Guidance':     { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Downgrades':   { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Bearish'  },
+
+  // High but less immediately time-sensitive
+  'Earnings':     { materiality: 'High',   immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Upgrades':     { materiality: 'Medium', immediate: true,  notificationWorthy: true,  sentiment: 'Bullish'  },
+
+  // Medium
+  'IPO':          { materiality: 'Medium', immediate: false, notificationWorthy: true,  sentiment: 'Bullish'  },
+  'Dividends':    { materiality: 'Medium', immediate: false, notificationWorthy: false, sentiment: 'Neutral'  },
+  'Buybacks':     { materiality: 'Medium', immediate: false, notificationWorthy: false, sentiment: 'Bullish'  },
+  'Management':   { materiality: 'Medium', immediate: false, notificationWorthy: true,  sentiment: 'Neutral'  },
+  'Options':      { materiality: 'Medium', immediate: false, notificationWorthy: false, sentiment: 'Neutral'  },
+  'Movers':       { materiality: 'Medium', immediate: true,  notificationWorthy: true,  sentiment: 'Neutral'  },
+
+  // Low — routine
+  'Press Releases': { materiality: 'Low', immediate: false, notificationWorthy: false, sentiment: 'Neutral' },
+  'General':      { materiality: 'Low',   immediate: false, notificationWorthy: false, sentiment: 'Neutral'  },
+};
+
+/**
+ * Given a Benzinga channels array, return the highest-priority fast-path rule
+ * or null if no matching rule exists (→ must use LLM).
+ */
+export function getFastPathRule(channels: string[]): FastPathRule | null {
+  const PRIORITY_ORDER = [
+    'M&A', 'Mergers & Acquisitions', 'Bankruptcy', 'FDA', 'Biotech',
+    'Government', 'Legal', 'Guidance', 'Downgrades', 'Earnings',
+    'Upgrades', 'IPO', 'Management', 'Movers', 'Dividends',
+    'Buybacks', 'Options', 'Press Releases', 'General',
+  ];
+
+  for (const key of PRIORITY_ORDER) {
+    if (channels.some((c) => c.toLowerCase() === key.toLowerCase())) {
+      return BENZINGA_CHANNEL_RULES[key] ?? null;
+    }
+  }
+  return null;
+}

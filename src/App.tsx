@@ -5,7 +5,6 @@ import { FeedContainer } from './components/feed/FeedContainer';
 import { APIKeyModal } from './components/settings/APIKeyModal';
 import { useSECFilings } from './hooks/useSECFilings';
 import { useNewsItems } from './hooks/useNewsItems';
-import { useCapitalIQ } from './hooks/useCapitalIQ';
 import { useClassification } from './hooks/useClassification';
 
 function getStoredKey(envKey: string, storageKey: string): string {
@@ -18,12 +17,10 @@ function getStoredKey(envKey: string, storageKey: string): string {
 
 function DataLayer() {
   const anthropicKey = getStoredKey('VITE_ANTHROPIC_API_KEY', 'anthropic_key');
-  const alpacaKey = getStoredKey('VITE_ALPACA_API_KEY', 'alpaca_key');
-  const alpacaSecret = getStoredKey('VITE_ALPACA_API_SECRET', 'alpaca_secret');
+  const benzingaToken = getStoredKey('VITE_BENZINGA_TOKEN', 'benzinga_token');
 
   useSECFilings();
-  useNewsItems(alpacaKey, alpacaSecret);
-  useCapitalIQ();
+  useNewsItems(benzingaToken);
   useClassification(anthropicKey);
 
   return null;
@@ -37,14 +34,9 @@ export default function App() {
     return !hasKey;
   });
 
-  function handleSaveKeys(keys: {
-    anthropicKey: string;
-    alpacaKey: string;
-    alpacaSecret: string;
-  }) {
+  function handleSaveKeys(keys: { anthropicKey: string; benzingaToken: string }) {
     if (keys.anthropicKey) sessionStorage.setItem('anthropic_key', keys.anthropicKey);
-    if (keys.alpacaKey) sessionStorage.setItem('alpaca_key', keys.alpacaKey);
-    if (keys.alpacaSecret) sessionStorage.setItem('alpaca_secret', keys.alpacaSecret);
+    if (keys.benzingaToken) sessionStorage.setItem('benzinga_token', keys.benzingaToken);
     setShowModal(false);
   }
 
