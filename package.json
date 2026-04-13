@@ -1,0 +1,25 @@
+{
+  "name": "scifxaic",
+  "version": "1.0.0",
+  "description": "Hello",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rshiramss/scifxaic.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/rshiramss/scifxaic/issues"
+  },
+  "homepage": "https://github.com/rshiramss/scifxaic#readme",
+  "dependencies": {
+    "@slack/bolt": "^4.7.0",
+    "dotenv": "^17.4.2"
+  }
+}
