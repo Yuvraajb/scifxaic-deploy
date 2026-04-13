@@ -11,6 +11,12 @@ app.message('hi', async ({ message, say }) => {
   await say(`Hey there, <@${message.user}>!`);
 });
 
+// Slash command: /hello
+app.command('/hello', async ({ command, ack, respond }) => {
+  await ack();
+  await respond(`Hey <@${command.user_id}>! 👋 The bot is alive and working!`);
+});
+
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log('Bot is running');
