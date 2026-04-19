@@ -16,6 +16,13 @@ dist-ssr
 .env
 .env.local
 
+# Python
+scif-slack-bot/venv/
+scif-slack-bot/__pycache__/
+scif-slack-bot/*.pyc
+scif-slack-bot/seen_articles.json
+scif-slack-bot/digest_queue.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

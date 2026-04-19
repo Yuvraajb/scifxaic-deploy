@@ -58,6 +58,7 @@ def build_alert_blocks(
     ticker: str = "",
     source: str = "Unknown",
     timestamp: str = "Just now",
+    summary: str = "",
 ) -> list[dict]:
     """
     Build a Slack Block Kit payload for a needle-mover alert.
@@ -66,65 +67,73 @@ def build_alert_blocks(
     ticker_str = f" (${ticker})" if ticker else ""
     verdict_upper = verdict.upper()
     icon = _icon(verdict_upper)
+    color = _color(verdict_upper)
+
+    # Verdict badge with color-coded label
+    verdict_label = {
+        "BREAKS": "🔴 BREAKS THESIS",
+        "SUPPORTS": "🟢 SUPPORTS THESIS",
+        "NEUTRAL": "⚪ NEUTRAL",
+    }.get(verdict_upper, verdict_upper)
 
     blocks = [
-        # Header
-        {
-            "type": "header",
-            "text": {
-                "type": "plain_text",
-                "text": "🚨 NEEDLE-MOVER ALERT",
-                "emoji": True,
-            },
-        },
         {"type": "divider"},
-        # Company + sector
+        # Company header row
         {
             "type": "section",
             "fields": [
                 {
                     "type": "mrkdwn",
-                    "text": f"*Company:*\n{company}{ticker_str}",
+                    "text": f"*{company}{ticker_str}*\n_{sector}_",
                 },
                 {
                     "type": "mrkdwn",
-                    "text": f"*Sector:*\n{sector}",
+                    "text": f"*{verdict_label}*\n_{timestamp}_",
                 },
             ],
         },
-        # Event + verdict
-        {
-            "type": "section",
-            "fields": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"*Event:*\n{event_type}",
-                },
-                {
-                    "type": "mrkdwn",
-                    "text": f"*Thesis Impact:*\n{verdict_upper} {icon}",
-                },
-            ],
-        },
-        # Explanation
+        # Event type
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": f"*Why:* {explanation}",
+                "text": f":newspaper: *{event_type}*",
             },
         },
-        {"type": "divider"},
+    ]
+
+    # News summary (the actual article body)
+    if summary:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"_{summary}_",
+                },
+            }
+        )
+
+    blocks += [
+        # Thesis impact explanation
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f":dart: *Thesis impact:* {explanation}",
+            },
+        },
         # Footer
         {
             "type": "context",
             "elements": [
                 {
                     "type": "mrkdwn",
-                    "text": f"_Sourced from: {source} • {timestamp}_",
+                    "text": f"Source: *{source}*  •  _Use `/subscriptions` to manage your alerts_",
                 }
             ],
         },
+        {"type": "divider"},
     ]
     return blocks
 
@@ -173,6 +182,7 @@ def send_instant_alert(
     ticker: str = "",
     source: str = "Unknown",
     timestamp: str = "Just now",
+    summary: str = "",
     channel: str | None = None,
     client=None,
 ) -> bool:
@@ -205,6 +215,7 @@ def send_instant_alert(
         ticker=ticker,
         source=source,
         timestamp=timestamp,
+        summary=summary,
     )
 
     fallback_text = format_alert_text(
@@ -252,6 +263,7 @@ def send_dm_alert(
     ticker: str = "",
     source: str = "Unknown",
     timestamp: str = "Just now",
+    summary: str = "",
     client=None,
 ) -> bool:
     """
@@ -267,7 +279,8 @@ def send_dm_alert(
         ticker=ticker,
         source=source,
         timestamp=timestamp,
-        channel=user_id,   # Slack accepts user_id as a DM channel target
+        summary=summary,
+        channel=user_id,
         client=client,
     )
 

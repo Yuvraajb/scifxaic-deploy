@@ -65,10 +65,21 @@ def run_mock_demo() -> None:
 # ---------------------------------------------------------------------------
 
 def run_bot() -> None:
-    """Start the live Slack bot using Socket Mode."""
+    """Start the live Slack bot and news scheduler."""
     try:
+        import os
+        from slack_sdk import WebClient
         from bot import create_app, start_socket_mode
+        from scheduler import start_scheduler
+
         app = create_app()
+
+        # Build a WebClient the scheduler can use to post messages
+        slack_client = WebClient(token=os.environ["SLACK_BOT_TOKEN"])
+
+        # Start news polling in the background before blocking on Socket Mode
+        start_scheduler(slack_client)
+
         start_socket_mode(app)
     except EnvironmentError as e:
         print(f"\n[CONFIG ERROR]\n{e}\n")

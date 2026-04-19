@@ -20,6 +20,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from dotenv import load_dotenv
 
 from subscriptions import (
+    KNOWN_SECTORS,
     subscribe,
     subscribe_all,
     unsubscribe,
@@ -60,14 +61,207 @@ def create_app() -> App:
 # Handler registration
 # ---------------------------------------------------------------------------
 
+def _build_onboarding_blocks() -> list[dict]:
+    """Build the sector-selection onboarding message using Block Kit checkboxes."""
+    sector_emojis = {
+        "EV / Clean Energy":    "🔵",
+        "Biotech":              "🟢",
+        "Enterprise Tech / AI": "🟣",
+        "Consumer":             "🟡",
+        "Financials":           "🟠",
+        "Healthcare":           "⚪",
+        "Energy":               "🔴",
+        "Industrials":          "🟤",
+        "Real Estate":          "🏠",
+    }
+    options = [
+        {
+            "text": {
+                "type": "plain_text",
+                "text": f"{sector_emojis.get(s, '▪️')}  {s}",
+                "emoji": True,
+            },
+            "value": s,
+        }
+        for s in KNOWN_SECTORS
+    ]
+
+    return [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": "👋 Welcome to SCIF Alerts!",
+                "emoji": True,
+            },
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "I'll send you *instant alerts* for breaking events and "
+                    "*daily digests* for slower-moving news.\n\n"
+                    "*Select the sectors you cover:*"
+                ),
+            },
+        },
+        {
+            "type": "actions",
+            "block_id": "sector_onboarding",
+            "elements": [
+                {
+                    "type": "checkboxes",
+                    "action_id": "sector_checkboxes",
+                    "options": options,
+                }
+            ],
+        },
+        {
+            "type": "actions",
+            "block_id": "onboarding_submit",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "✅  Save my preferences",
+                        "emoji": True,
+                    },
+                    "style": "primary",
+                    "action_id": "save_sector_preferences",
+                    "value": "save",
+                },
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Subscribe to all sectors",
+                        "emoji": True,
+                    },
+                    "action_id": "subscribe_all_sectors",
+                    "value": "all",
+                },
+            ],
+        },
+    ]
+
+
 def _register_handlers(app: App) -> None:
     """Attach all slash commands and event listeners to the app."""
+
+    # ------------------------------------------------------------------
+    # member_joined_channel — send onboarding DM
+    # NOTE: Add 'member_joined_channel' to your Slack app's Event Subscriptions.
+    # Required scope: channels:read (for public channels) or groups:read (private).
+    # ------------------------------------------------------------------
+    @app.event("member_joined_channel")
+    def handle_member_joined(event, client, logger):
+        user_id = event.get("user")
+        if not user_id:
+            return
+        # Don't DM ourselves (the bot joining its own channel)
+        bot_info = client.auth_test()
+        if user_id == bot_info["user_id"]:
+            return
+
+        try:
+            # Open a DM channel with the new member
+            dm = client.conversations_open(users=user_id)
+            dm_channel = dm["channel"]["id"]
+            client.chat_postMessage(
+                channel=dm_channel,
+                text="Welcome to SCIF Alerts! Please select your sector subscriptions.",
+                blocks=_build_onboarding_blocks(),
+            )
+            logger.info(f"Sent onboarding DM to {user_id}")
+        except Exception as e:
+            logger.error(f"Failed to send onboarding DM to {user_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Block action — user clicks "Save my preferences"
+    # ------------------------------------------------------------------
+    @app.action("save_sector_preferences")
+    def handle_save_preferences(ack, body, client, logger):
+        ack()
+        user_id = body["user"]["id"]
+        channel_id = body["container"]["channel_id"]
+        message_ts = body["container"]["message_ts"]
+
+        # Read checkbox state from the message payload
+        state_values = body.get("state", {}).get("values", {})
+        checkbox_state = state_values.get("sector_onboarding", {}).get("sector_checkboxes", {})
+        selected = checkbox_state.get("selected_options", [])
+        chosen_sectors = [opt["value"] for opt in selected]
+
+        if not chosen_sectors:
+            client.chat_postMessage(
+                channel=channel_id,
+                text="No sectors selected — use `/subscribe <sector>` anytime to add subscriptions.",
+            )
+            return
+
+        # Persist subscriptions
+        from subscriptions import _load, _save
+        data = _load()
+        data[user_id] = chosen_sectors
+        _save(data)
+
+        bullet_list = "\n".join(f"• {s}" for s in chosen_sectors)
+        client.chat_update(
+            channel=channel_id,
+            ts=message_ts,
+            text=f"Subscriptions saved! You'll get alerts for: {', '.join(chosen_sectors)}",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*All set!* You're subscribed to {len(chosen_sectors)} sector(s):\n"
+                            f"{bullet_list}\n\n"
+                            "_Use `/subscribe` or `/unsubscribe` to update anytime._"
+                        ),
+                    },
+                }
+            ],
+        )
+        logger.info(f"User {user_id} saved subscriptions: {chosen_sectors}")
+
+    # ------------------------------------------------------------------
+    # Block action — user clicks "Subscribe to all sectors"
+    # ------------------------------------------------------------------
+    @app.action("subscribe_all_sectors")
+    def handle_subscribe_all(ack, body, client, logger):
+        ack()
+        user_id = body["user"]["id"]
+        channel_id = body["container"]["channel_id"]
+        message_ts = body["container"]["message_ts"]
+        ok, msg = subscribe_all(user_id)
+        client.chat_update(
+            channel=channel_id,
+            ts=message_ts,
+            text=msg,
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*All set!* You're now subscribed to all {len(KNOWN_SECTORS)} sectors.\n\n"
+                            "_Use `/unsubscribe <sector>` to narrow your alerts anytime._"
+                        ),
+                    },
+                }
+            ],
+        )
+        logger.info(f"User {user_id} subscribed to all sectors via onboarding")
 
     # ------------------------------------------------------------------
     # /subscribe <sector|all>
     # ------------------------------------------------------------------
     @app.command("/subscribe")
-    def handle_subscribe(ack, command, say):
+    def handle_subscribe(ack, command, respond):
         """
         Subscribe the calling analyst to a sector (or all sectors).
         Usage: /subscribe tech | /subscribe all
@@ -77,7 +271,7 @@ def _register_handlers(app: App) -> None:
         sector_arg = command.get("text", "").strip()
 
         if not sector_arg:
-            say(
+            respond(
                 "Please specify a sector. Examples:\n"
                 "• `/subscribe tech`\n"
                 "• `/subscribe biotech`\n"
@@ -92,13 +286,13 @@ def _register_handlers(app: App) -> None:
             ok, msg = subscribe(user_id, sector_arg)
 
         # Reply only visible to the user who ran the command
-        say(msg)
+        respond(msg)
 
     # ------------------------------------------------------------------
     # /unsubscribe <sector|all>
     # ------------------------------------------------------------------
     @app.command("/unsubscribe")
-    def handle_unsubscribe(ack, command, say):
+    def handle_unsubscribe(ack, command, respond):
         """
         Unsubscribe the calling analyst from a sector (or all sectors).
         Usage: /unsubscribe tech | /unsubscribe all
@@ -108,7 +302,7 @@ def _register_handlers(app: App) -> None:
         sector_arg = command.get("text", "").strip()
 
         if not sector_arg:
-            say("Please specify a sector or `all`. Example: `/unsubscribe biotech`")
+            respond("Please specify a sector or `all`. Example: `/unsubscribe biotech`")
             return
 
         if sector_arg.lower() == "all":
@@ -116,17 +310,17 @@ def _register_handlers(app: App) -> None:
         else:
             ok, msg = unsubscribe(user_id, sector_arg)
 
-        say(msg)
+        respond(msg)
 
     # ------------------------------------------------------------------
     # /subscriptions — list current subscriptions
     # ------------------------------------------------------------------
     @app.command("/subscriptions")
-    def handle_list_subscriptions(ack, command, say):
+    def handle_list_subscriptions(ack, command, respond):
         """Show the analyst their current sector subscriptions."""
         ack()
         user_id = command["user_id"]
-        say(format_subscriptions_list(user_id))
+        respond(format_subscriptions_list(user_id))
 
     # ------------------------------------------------------------------
     # @mention — help message
