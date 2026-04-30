@@ -6,6 +6,11 @@ const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
 
+receiver.app.use((req, _res, next) => {
+  console.log(`[DEBUG] ${req.method} ${req.path} — headers: ${JSON.stringify(req.headers['x-slack-signature'] ? 'slack-sig present' : 'no slack-sig')}`);
+  next();
+});
+
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver,
