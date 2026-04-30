@@ -4,15 +4,9 @@ const os = require('os');
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
 const officeParser = require('officeparser');
-const { createClient } = require('@supabase/supabase-js');
 const GroqSDK = require('groq-sdk');
 
 const Groq = GroqSDK.default || GroqSDK;
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -87,22 +81,12 @@ async function extractTickerAndThesis(text) {
   }
 }
 
-// Orchestrate download → extract → clean → LLM → store in investment_tracker.
-async function processFile({ downloadUrl, fileType, slackIds, slackToken }) {
+// Orchestrate download → extract → clean → LLM.
+async function processFile({ downloadUrl, fileType, slackToken }) {
   const buffer = await downloadFile(downloadUrl, slackToken);
   const rawText = await extractText(buffer, fileType);
   const cleanedText = cleanText(rawText);
-  const { ticker, thesis } = await extractTickerAndThesis(cleanedText);
-
-  const { error } = await supabase.from('investment_tracker').insert({
-    ticker,
-    slack_ids: slackIds,
-    thesis,
-  });
-
-  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
-
-  return { ticker, thesis };
+  return extractTickerAndThesis(cleanedText);
 }
 
 module.exports = { processFile };
