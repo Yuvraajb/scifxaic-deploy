@@ -9,11 +9,21 @@ console.log('[ENV] SUPABASE_URL set:', !!process.env.SUPABASE_URL);
 
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
+  middlewares: [
+    (req, _res, next) => {
+      console.log(`[RAW] ${req.method} ${req.path} sig=${req.headers['x-slack-signature'] || 'none'}`);
+      next();
+    },
+  ],
 });
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver,
+});
+
+app.error(async (error) => {
+  console.error('[BOLT ERROR]', error.message, error.code);
 });
 
 // Health check endpoint — keeps Render from spinning down
