@@ -48,24 +48,9 @@ const pendingUploads = new Map();
 // Slash command: /upload [@user1 @user2 ...]
 // Optional mentions associate additional Slack users with the investment.
 // The invoker is always included. Ticker is detected from the deck automatically.
-app.command('/upload', async ({ command, ack, respond }) => {
-  console.log('[UPLOAD] command received from', command.user_id);
+app.command('/upload', async ({ ack, respond }) => {
   await ack();
-  console.log('[UPLOAD] ack sent');
-
-  // Extract mentioned user IDs from text (format: <@U12345> or <@U12345|name>)
-  const mentionedIds = [...command.text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)]
-    .map(m => m[1]);
-
-  // Always include the invoker; deduplicate
-  const slackIds = [...new Set([command.user_id, ...mentionedIds])];
-
-  pendingUploads.set(`${command.channel_id}:${command.user_id}`, { slackIds });
-
-  const mentions = slackIds.map(id => `<@${id}>`).join(', ');
-  await respond(
-    `Got it! Tracking for ${mentions}. Share the pitch deck (PDF or PPTX) in this channel and I'll extract the ticker and thesis automatically.`
-  );
+  await respond('upload handler reached');
 });
 
 // Listen for file shares. Only processes files when a /upload intent is pending
