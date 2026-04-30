@@ -49,7 +49,9 @@ const pendingUploads = new Map();
 // Optional mentions associate additional Slack users with the investment.
 // The invoker is always included. Ticker is detected from the deck automatically.
 app.command('/upload', async ({ command, ack, respond }) => {
+  console.log('[UPLOAD] command received from', command.user_id);
   await ack();
+  console.log('[UPLOAD] ack sent');
 
   // Extract mentioned user IDs from text (format: <@U12345> or <@U12345|name>)
   const mentionedIds = [...command.text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)]
