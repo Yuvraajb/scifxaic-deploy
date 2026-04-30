@@ -2,13 +2,13 @@ require('dotenv').config();
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { processFile } = require('./handlers/upload');
 
+console.log('[ENV] SLACK_BOT_TOKEN set:', !!process.env.SLACK_BOT_TOKEN);
+console.log('[ENV] SLACK_SIGNING_SECRET set:', !!process.env.SLACK_SIGNING_SECRET);
+console.log('[ENV] GROQ_API_KEY set:', !!process.env.GROQ_API_KEY);
+console.log('[ENV] SUPABASE_URL set:', !!process.env.SUPABASE_URL);
+
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
-});
-
-receiver.app.use((req, _res, next) => {
-  console.log(`[DEBUG] ${req.method} ${req.path} — headers: ${JSON.stringify(req.headers['x-slack-signature'] ? 'slack-sig present' : 'no slack-sig')}`);
-  next();
 });
 
 const app = new App({
