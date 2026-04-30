@@ -51,7 +51,7 @@ app.command('/deck', async ({ command, ack, respond }) => {
 
 // Listen for file shares. Only processes files when a /deck intent is pending
 // for that user+channel, then clears the intent.
-app.message(async ({ message, client, say }) => {
+app.event('message', async ({ event: message, client, say }) => {
   if (!message.files || message.files.length === 0) return;
 
   const key = `${message.channel}:${message.user}`;
