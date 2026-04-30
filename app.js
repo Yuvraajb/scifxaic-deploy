@@ -78,20 +78,22 @@ app.message(async ({ message, client, say }) => {
         downloadUrl = info.file.url_private_download;
       }
 
+      console.log(`[PROCESS] starting extraction for file ${file.id} type=${file.filetype}`);
       const { ticker, thesis } = await processFile({
         fileType: file.filetype,
         downloadUrl,
         slackIds: pending.slackIds,
         slackToken: process.env.SLACK_BOT_TOKEN,
       });
+      console.log(`[PROCESS] done ticker=${ticker}`);
 
       const mentions = pending.slackIds.map(id => `<@${id}>`).join(', ');
       await say(
         `*${ticker} — Thesis:*\n\n>${thesis}\n\n_Saved to investment tracker. Tracking: ${mentions}_`
       );
     } catch (err) {
-      console.error('Upload handler error:', err);
-      await say(`Sorry, I ran into an error processing the deck: ${err.message}`);
+      console.error('[PROCESS ERROR]', err.message);
+      await say(`Sorry, I ran into an error: ${err.message}`);
     }
   });
 });

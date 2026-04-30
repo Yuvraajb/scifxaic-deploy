@@ -61,7 +61,7 @@ function cleanText(text) {
 // Returns { ticker, thesis }.
 async function extractTickerAndThesis(text) {
   const completion = await groq.chat.completions.create({
-    model: 'openai/gpt-oss-120b',
+    model: 'llama-3.3-70b-versatile',
     messages: [
       {
         role: 'system',
