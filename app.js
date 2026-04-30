@@ -31,14 +31,98 @@ app.command('/hello', async ({ command, ack, respond }) => {
 
 // Tracks pending deck upload intents: `${channelId}:${userId}` -> { slackIds }
 const pendingUploads = new Map();
+const pendingAttributions = new Map();
 const processedDecks = new Map();
 const supportedDeckTypes = new Set(['pdf', 'pptx']);
 
 function rememberProcessedDeck(deck) {
   const id = crypto.randomUUID();
   processedDecks.set(id, deck);
-  setTimeout(() => processedDecks.delete(id), 60 * 60 * 1000);
+  setTimeout(() => {
+    processedDecks.delete(id);
+    for (const [key, pendingId] of pendingAttributions.entries()) {
+      if (pendingId === id) pendingAttributions.delete(key);
+    }
+  }, 60 * 60 * 1000);
   return id;
+}
+
+function expireProcessedDeck(id, channel, user) {
+  processedDecks.delete(id);
+  pendingAttributions.delete(`${channel}:${user}`);
+}
+
+function parseSlackMentionIds(text) {
+  return [...text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)]
+    .map(match => match[1])
+    .filter((id, index, ids) => ids.indexOf(id) === index);
+}
+
+function normalizeMentionsOrText(text) {
+  const mentionIds = parseSlackMentionIds(text);
+  if (mentionIds.length > 0) {
+    return mentionIds.map(id => `<@${id}>`).join(', ');
+  }
+
+  return text.trim();
+}
+
+function readLabeledAttribution(text, labels) {
+  const escapedLabels = labels.map(label => label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const labelPattern = escapedLabels.join('|');
+  const match = text.match(new RegExp(`(?:^|\\n)\\s*\\*?\\s*(?:${labelPattern})\\s*\\*?\\s*:\\s*([^\\n]+)`, 'i'));
+  return match ? normalizeMentionsOrText(match[1]) : '';
+}
+
+function parseAttributionText(text) {
+  const attribution = {
+    deckCreator: readLabeledAttribution(text, ['deck creator', 'created by', 'creator']),
+    investmentMaker: readLabeledAttribution(text, ['investment maker', 'investor', 'investment by', 'made by']),
+    thesisContributors: readLabeledAttribution(text, ['thesis contributors', 'thesis', 'contributors', 'worked on thesis']),
+  };
+
+  if (!attribution.deckCreator && !attribution.investmentMaker && !attribution.thesisContributors) {
+    const mentionIds = parseSlackMentionIds(text);
+    if (mentionIds.length > 0) {
+      attribution.thesisContributors = mentionIds.map(id => `<@${id}>`).join(', ');
+    }
+  }
+
+  return attribution;
+}
+
+function hasAttribution(attribution) {
+  return Boolean(
+    attribution.deckCreator ||
+    attribution.investmentMaker ||
+    attribution.thesisContributors
+  );
+}
+
+async function saveDeckAttribution({ deckId, attribution, client, fallbackChannel, fallbackThreadTs }) {
+  const deck = processedDecks.get(deckId);
+  if (!deck) {
+    await client.chat.postMessage({
+      channel: fallbackChannel,
+      thread_ts: fallbackThreadTs,
+      text: 'I could not find the processed deck details anymore. Please run /deck and upload the deck again.',
+    });
+    return;
+  }
+
+  await saveInvestment({
+    ticker: deck.ticker,
+    thesis: deck.thesis,
+    slackIds: deck.slackIds,
+    attribution,
+  });
+  expireProcessedDeck(deckId, deck.channel, deck.user);
+
+  await client.chat.postMessage({
+    channel: deck.channel,
+    thread_ts: deck.threadTs,
+    text: `Saved *${deck.ticker}* to the investment tracker with attribution details.`,
+  });
 }
 
 function getSupportedDeckType(file) {
@@ -74,9 +158,32 @@ app.command('/deck', handleDeckUploadCommand);
 // Listen for file shares. Only processes files when a deck upload intent is pending
 // for that user+channel, then clears the intent.
 app.event('message', async ({ event: message, client, say }) => {
+  const key = `${message.channel}:${message.user}`;
+  const pendingAttributionDeckId = pendingAttributions.get(key);
+  if (!message.files && pendingAttributionDeckId && message.text) {
+    const attribution = parseAttributionText(message.text);
+    if (!hasAttribution(attribution)) {
+      await say('Please include Slack @mentions for the deck attribution details.');
+      return;
+    }
+
+    try {
+      await saveDeckAttribution({
+        deckId: pendingAttributionDeckId,
+        attribution,
+        client,
+        fallbackChannel: message.channel,
+        fallbackThreadTs: message.thread_ts || message.ts,
+      });
+    } catch (err) {
+      console.error('[SAVE ERROR]', err.message);
+      await say(`I extracted the thesis, but could not save the attribution details: ${err.message}`);
+    }
+    return;
+  }
+
   if (!message.files || message.files.length === 0) return;
 
-  const key = `${message.channel}:${message.user}`;
   const pending = pendingUploads.get(key);
   if (!pending) return;
 
@@ -126,7 +233,9 @@ app.event('message', async ({ event: message, client, say }) => {
         slackIds: pending.slackIds,
         channel,
         threadTs,
+        user: message.user,
       });
+      pendingAttributions.set(key, deckId);
 
       await postMessage({
         text: `${ticker} thesis extracted. Add attribution details to save it.`,
@@ -135,7 +244,7 @@ app.event('message', async ({ event: message, client, say }) => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `*${ticker} — Thesis:*\n\n>${thesis}\n\n_Tracking: ${mentions}_\n\nAdd attribution details to save this to the investment tracker.`,
+              text: `*${ticker} — Thesis:*\n\n>${thesis}\n\n_Tracking: ${mentions}_\n\nAdd attribution details to save this to the investment tracker. You can click the button, or reply here with lines like:\n\`Deck creator: @name\`\n\`Investment maker: @name\`\n\`Thesis contributors: @name @name\``,
             },
           },
           {
@@ -263,24 +372,17 @@ app.view('deck_attribution_submission', async ({ ack, body, view, client }) => {
 
   const values = view.state.values;
   const attribution = {
-    deckCreator: values.deck_creator.value.value.trim(),
-    investmentMaker: values.investment_maker.value.value.trim(),
-    thesisContributors: values.thesis_contributors.value.value.trim(),
+    deckCreator: normalizeMentionsOrText(values.deck_creator.value.value),
+    investmentMaker: normalizeMentionsOrText(values.investment_maker.value.value),
+    thesisContributors: normalizeMentionsOrText(values.thesis_contributors.value.value),
   };
 
   try {
-    await saveInvestment({
-      ticker: deck.ticker,
-      thesis: deck.thesis,
-      slackIds: deck.slackIds,
+    await saveDeckAttribution({
+      deckId,
       attribution,
-    });
-    processedDecks.delete(deckId);
-
-    await client.chat.postMessage({
-      channel: deck.channel,
-      thread_ts: deck.threadTs,
-      text: `Saved *${deck.ticker}* to the investment tracker with attribution details.`,
+      client,
+      fallbackChannel: body.user.id,
     });
   } catch (err) {
     console.error('[SAVE ERROR]', err.message);
