@@ -2,28 +2,13 @@ require('dotenv').config();
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { processFile } = require('./handlers/upload');
 
-console.log('[ENV] SLACK_BOT_TOKEN set:', !!process.env.SLACK_BOT_TOKEN);
-console.log('[ENV] SLACK_SIGNING_SECRET set:', !!process.env.SLACK_SIGNING_SECRET);
-console.log('[ENV] GROQ_API_KEY set:', !!process.env.GROQ_API_KEY);
-console.log('[ENV] SUPABASE_URL set:', !!process.env.SUPABASE_URL);
-
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
-  middlewares: [
-    (req, _res, next) => {
-      console.log(`[RAW] ${req.method} ${req.path} sig=${req.headers['x-slack-signature'] || 'none'}`);
-      next();
-    },
-  ],
 });
 
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver,
-});
-
-app.error(async (error) => {
-  console.error('[BOLT ERROR]', error.message, error.code);
 });
 
 // Health check endpoint — keeps Render from spinning down
@@ -42,18 +27,29 @@ app.command('/hello', async ({ command, ack, respond }) => {
   await respond(`Hey <@${command.user_id}>! 👋 The bot is alive and working!`);
 });
 
-// Tracks pending /upload intents: `${channelId}:${userId}` -> { slackIds }
+// Tracks pending /deck intents: `${channelId}:${userId}` -> { slackIds }
 const pendingUploads = new Map();
 
-// Slash command: /upload [@user1 @user2 ...]
+// Slash command: /deck [@user1 @user2 ...]
 // Optional mentions associate additional Slack users with the investment.
 // The invoker is always included. Ticker is detected from the deck automatically.
-app.command('/upload', async ({ ack, respond }) => {
+app.command('/deck', async ({ command, ack, respond }) => {
   await ack();
-  await respond('upload handler reached');
+
+  const mentionedIds = [...command.text.matchAll(/<@([A-Z0-9]+)(?:\|[^>]+)?>/g)]
+    .map(m => m[1]);
+
+  const slackIds = [...new Set([command.user_id, ...mentionedIds])];
+
+  pendingUploads.set(`${command.channel_id}:${command.user_id}`, { slackIds });
+
+  const mentions = slackIds.map(id => `<@${id}>`).join(', ');
+  await respond(
+    `Got it! Tracking for ${mentions}. Share the pitch deck (PDF or PPTX) in this channel and I'll extract the ticker and thesis automatically.`
+  );
 });
 
-// Listen for file shares. Only processes files when a /upload intent is pending
+// Listen for file shares. Only processes files when a /deck intent is pending
 // for that user+channel, then clears the intent.
 app.message(async ({ message, client, say }) => {
   if (!message.files || message.files.length === 0) return;
