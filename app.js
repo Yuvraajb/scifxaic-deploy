@@ -66,30 +66,34 @@ app.message(async ({ message, client, say }) => {
   }
 
   pendingUploads.delete(key);
-  await say('Processing your pitch deck… this may take a moment.');
 
-  try {
-    let downloadUrl = file.url_private_download;
-    if (!downloadUrl) {
-      const info = await client.files.info({ file: file.id });
-      downloadUrl = info.file.url_private_download;
+  // Ack the event immediately, then process async so Bolt doesn't time out
+  say('Processing your pitch deck… this may take a moment.').catch(() => {});
+
+  setImmediate(async () => {
+    try {
+      let downloadUrl = file.url_private_download;
+      if (!downloadUrl) {
+        const info = await client.files.info({ file: file.id });
+        downloadUrl = info.file.url_private_download;
+      }
+
+      const { ticker, thesis } = await processFile({
+        fileType: file.filetype,
+        downloadUrl,
+        slackIds: pending.slackIds,
+        slackToken: process.env.SLACK_BOT_TOKEN,
+      });
+
+      const mentions = pending.slackIds.map(id => `<@${id}>`).join(', ');
+      await say(
+        `*${ticker} — Thesis:*\n\n>${thesis}\n\n_Saved to investment tracker. Tracking: ${mentions}_`
+      );
+    } catch (err) {
+      console.error('Upload handler error:', err);
+      await say(`Sorry, I ran into an error processing the deck: ${err.message}`);
     }
-
-    const { ticker, thesis } = await processFile({
-      fileType: file.filetype,
-      downloadUrl,
-      slackIds: pending.slackIds,
-      slackToken: process.env.SLACK_BOT_TOKEN,
-    });
-
-    const mentions = pending.slackIds.map(id => `<@${id}>`).join(', ');
-    await say(
-      `*${ticker} — Thesis:*\n\n>${thesis}\n\n_Saved to investment tracker. Tracking: ${mentions}_`
-    );
-  } catch (err) {
-    console.error('Upload handler error:', err);
-    await say(`Sorry, I ran into an error processing the deck: ${err.message}`);
-  }
+  });
 });
 
 // App mention: @YourBot
