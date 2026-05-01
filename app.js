@@ -33,7 +33,31 @@ app.command('/hello', async ({ command, ack, respond }) => {
 const pendingUploads = new Map();
 const pendingAttributions = new Map();
 const processedDecks = new Map();
+const subscriptions = new Map();
 const supportedDeckTypes = new Set(['pdf', 'pptx']);
+const subscriptionCategoryOptions = [
+  {
+    text: {
+      type: 'plain_text',
+      text: 'Consumer',
+    },
+    value: 'consumer',
+  },
+  {
+    text: {
+      type: 'plain_text',
+      text: 'Healthcare',
+    },
+    value: 'healthcare',
+  },
+  {
+    text: {
+      type: 'plain_text',
+      text: 'TMT',
+    },
+    value: 'tmt',
+  },
+];
 
 function rememberProcessedDeck(deck) {
   const id = crypto.randomUUID();
@@ -150,10 +174,79 @@ async function handleDeckUploadCommand({ command, ack, respond }) {
   );
 }
 
+function getSubscriptionInitialOptions(userId) {
+  const selected = subscriptions.get(userId) || [];
+  return subscriptionCategoryOptions.filter(option => selected.includes(option.value));
+}
+
+function formatSubscriptionCategories(values) {
+  if (values.length === 0) return 'No categories selected.';
+
+  const names = subscriptionCategoryOptions
+    .filter(option => values.includes(option.value))
+    .map(option => option.text.text);
+
+  return names.join(', ');
+}
+
+async function handleSubscribeCommand({ command, ack, client }) {
+  await ack();
+
+  const initialOptions = getSubscriptionInitialOptions(command.user_id);
+  const categoryElement = {
+    type: 'multi_static_select',
+    action_id: 'categories',
+    placeholder: {
+      type: 'plain_text',
+      text: 'Select categories',
+    },
+    options: subscriptionCategoryOptions,
+  };
+
+  if (initialOptions.length > 0) {
+    categoryElement.initial_options = initialOptions;
+  }
+
+  await client.views.open({
+    trigger_id: command.trigger_id,
+    view: {
+      type: 'modal',
+      callback_id: 'subscription_preferences_submission',
+      private_metadata: JSON.stringify({ userId: command.user_id }),
+      title: {
+        type: 'plain_text',
+        text: 'Subscriptions',
+      },
+      submit: {
+        type: 'plain_text',
+        text: 'Save',
+      },
+      close: {
+        type: 'plain_text',
+        text: 'Cancel',
+      },
+      blocks: [
+        {
+          type: 'input',
+          block_id: 'subscription_categories',
+          optional: true,
+          label: {
+            type: 'plain_text',
+            text: 'Categories',
+          },
+          element: categoryElement,
+        },
+      ],
+    },
+  });
+}
+
 // Slash command: /deck [@user1 @user2 ...]
 // Optional mentions associate additional Slack users with the investment.
 // The invoker is always included. Ticker is detected from the deck automatically.
 app.command('/deck', handleDeckUploadCommand);
+
+app.command('/subscribe', handleSubscribeCommand);
 
 // Listen for file shares. Only processes files when a deck upload intent is pending
 // for that user+channel, then clears the intent.
@@ -392,6 +485,23 @@ app.view('deck_attribution_submission', async ({ ack, body, view, client }) => {
       text: `I extracted the thesis, but could not save the attribution details: ${err.message}`,
     });
   }
+});
+
+app.view('subscription_preferences_submission', async ({ ack, body, view, client }) => {
+  await ack();
+
+  const metadata = JSON.parse(view.private_metadata);
+  const userId = metadata.userId || body.user.id;
+  const selectedOptions =
+    view.state.values.subscription_categories.categories.selected_options || [];
+  const selectedValues = selectedOptions.map(option => option.value);
+
+  subscriptions.set(userId, selectedValues);
+
+  await client.chat.postMessage({
+    channel: userId,
+    text: `Subscription preferences saved: ${formatSubscriptionCategories(selectedValues)}`,
+  });
 });
 
 // App mention: @YourBot
