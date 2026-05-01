@@ -490,18 +490,23 @@ app.view('deck_attribution_submission', async ({ ack, body, view, client }) => {
 app.view('subscription_preferences_submission', async ({ ack, body, view, client }) => {
   await ack();
 
-  const metadata = JSON.parse(view.private_metadata);
-  const userId = metadata.userId || body.user.id;
-  const selectedOptions =
-    view.state.values.subscription_categories.categories.selected_options || [];
-  const selectedValues = selectedOptions.map(option => option.value);
+  try {
+    const metadata = JSON.parse(view.private_metadata);
+    const userId = metadata.userId || body.user.id;
+    const selectedOptions =
+      view.state.values.subscription_categories.categories.selected_options || [];
+    const selectedValues = selectedOptions.map(option => option.value);
 
-  subscriptions.set(userId, selectedValues);
+    subscriptions.set(userId, selectedValues);
+    console.log(`[SUBSCRIBE] saved for user=${userId} categories=${selectedValues.join(',')}`);
 
-  await client.chat.postMessage({
-    channel: userId,
-    text: `Subscription preferences saved: ${formatSubscriptionCategories(selectedValues)}`,
-  });
+    await client.chat.postMessage({
+      channel: userId,
+      text: `Subscription preferences saved: ${formatSubscriptionCategories(selectedValues)}`,
+    });
+  } catch (err) {
+    console.error('[SUBSCRIBE ERROR]', err.message, err.stack);
+  }
 });
 
 // App mention: @YourBot
@@ -512,4 +517,15 @@ app.event('app_mention', async ({ event, say }) => {
 (async () => {
   await app.start(process.env.PORT || 3000);
   console.log('Bot is running');
+
+  if (process.env.RENDER_EXTERNAL_URL) {
+    const https = require('https');
+    setInterval(() => {
+      https.get(`${process.env.RENDER_EXTERNAL_URL}/health`, res => {
+        console.log(`[KEEPALIVE] status=${res.statusCode}`);
+      }).on('error', err => {
+        console.error('[KEEPALIVE ERROR]', err.message);
+      });
+    }, 4 * 60 * 1000);
+  }
 })();
