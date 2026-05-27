@@ -2,6 +2,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const { App, ExpressReceiver } = require('@slack/bolt');
 const { saveInvestment } = require('./handlers/investments');
+const { getSectorsForSlackUser, upsertSubscriptionSectors } = require('./handlers/subscriptions');
 const { processFile } = require('./handlers/upload');
 
 const receiver = new ExpressReceiver({
@@ -33,7 +34,6 @@ app.command('/hello', async ({ command, ack, respond }) => {
 const pendingUploads = new Map();
 const pendingAttributions = new Map();
 const processedDecks = new Map();
-const subscriptions = new Map();
 const supportedDeckTypes = new Set(['pdf', 'pptx']);
 const subscriptionCategoryOptions = [
   {
@@ -174,11 +174,6 @@ async function handleDeckUploadCommand({ command, ack, respond }) {
   );
 }
 
-function getSubscriptionInitialOptions(userId) {
-  const selected = subscriptions.get(userId) || [];
-  return subscriptionCategoryOptions.filter(option => selected.includes(option.value));
-}
-
 function formatSubscriptionCategories(values) {
   if (values.length === 0) return 'No categories selected.';
 
@@ -192,7 +187,16 @@ function formatSubscriptionCategories(values) {
 async function handleSubscribeCommand({ command, ack, client }) {
   await ack();
 
-  const initialOptions = getSubscriptionInitialOptions(command.user_id);
+  let savedSectors = [];
+  try {
+    savedSectors = await getSectorsForSlackUser(command.user_id);
+  } catch (err) {
+    console.error('[SUBSCRIBE LOAD ERROR]', err.message);
+  }
+
+  const initialOptions = subscriptionCategoryOptions.filter(option =>
+    savedSectors.includes(option.value)
+  );
   const categoryElement = {
     type: 'multi_static_select',
     action_id: 'categories',
@@ -497,7 +501,7 @@ app.view('subscription_preferences_submission', async ({ ack, body, view, client
       view.state.values.subscription_categories.categories.selected_options || [];
     const selectedValues = selectedOptions.map(option => option.value);
 
-    subscriptions.set(userId, selectedValues);
+    await upsertSubscriptionSectors(userId, selectedValues);
     console.log(`[SUBSCRIBE] saved for user=${userId} categories=${selectedValues.join(',')}`);
 
     await client.chat.postMessage({
@@ -506,6 +510,23 @@ app.view('subscription_preferences_submission', async ({ ack, body, view, client
     });
   } catch (err) {
     console.error('[SUBSCRIBE ERROR]', err.message, err.stack);
+    let dmUser = body.user?.id;
+    try {
+      const metadata = JSON.parse(view.private_metadata);
+      dmUser = metadata.userId || dmUser;
+    } catch (_) {
+      /* use body.user.id */
+    }
+    if (dmUser) {
+      try {
+        await client.chat.postMessage({
+          channel: dmUser,
+          text: `Could not save subscription preferences: ${err.message}`,
+        });
+      } catch (_) {
+        // ignore DM failure
+      }
+    }
   }
 });
 
