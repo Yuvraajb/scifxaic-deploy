@@ -1,0 +1,384 @@
+# Render Migration: Functions → HTTP Endpoints
+
+This document specifies how to wrap the catalogued functions in `scif-slack-bot/` (Python) and `mvp/src/` (JS) as HTTP endpoints on Render, alongside the existing Slack-bot worker.
+
+All Render guidance below is sourced strictly from this repo's `render_docs/` folder. File names cited in parentheses point to `render_docs/<file>.md`.
+
+---
+
+## 1. Why Render needs HTTP wrappers in the first place
+
+Render has no function-as-a-service / serverless offering. Per `service-types.md`, the only ways to run code on Render are: web service, static site, private service, background worker, cron job, or workflow (`service-types.md:1-12`).
+
+- A **web service** is "the most common service type. Dynamic web apps with a public `onrender.com` subdomain for receiving traffic over HTTP" (`service-types.md:68-72`).
+- A **background worker** runs "internal apps that run continuously... Background workers do _not_ expose a URL or internal hostname" (`service-types.md:106-115`). This is what `render.yaml` currently uses for `scif-slack-bot`.
+- A **private service** is "just like a web service" but only reachable on Render's private network (`private-services.md:1-12`). Useful if endpoints should only be callable from other Render services, not the public internet.
+
+To expose any Python or JS function as an endpoint, it must be served by a long-running HTTP process inside a `type: web` (public) or `type: pserv` (private) service. Every web service "must bind to a port on host `0.0.0.0` to serve HTTP requests. The default expected port is `10000`" (`web-services.md` port-binding note, lines 7-9).
+
+---
+
+## 2. Framework choice per side
+
+### 2.1 Python side — FastAPI
+
+Use **FastAPI** for `scif-slack-bot/` endpoints.
+
+Render documents FastAPI as a first-class supported framework in `deploy-fastapi.md`. The recommended start command from that doc is `uvicorn main:app --host 0.0.0.0 --port $PORT` (`deploy-fastapi.md:10-15`), which satisfies the `0.0.0.0` binding requirement in `web-services.md`.
+
+Reasons over Flask:
+- Native async — matches the existing `requests` / Slack-bot pattern without adding a WSGI server like Gunicorn (Flask's recommended start command is `gunicorn app:app`, `deploy-flask.md:23-30`).
+- Pydantic models give the team request/response schemas for free, mirroring the existing JSON-shaped tool I/O in `classifier.py`.
+- Auto-generates OpenAPI / `/docs` UI — useful for CS1/CS2 teammates who already import these functions today.
+
+Flask is acceptable as an alternative; Render supports it the same way (`deploy-flask.md`). Either choice keeps `Language: Python 3`, `Build Command: pip install -r requirements.txt`.
+
+### 2.2 JS side — Express
+
+Use **Express** for `mvp/src/` endpoints.
+
+Render documents Express in `deploy-node-express-app.md` with `Language: Node`, `Build Command: yarn` (or `npm install`), `Start Command: node app.js` (`deploy-node-express-app.md:14-22`). The existing `mvp/package.json` already uses `"type": "module"` and Node, so Express drops in cleanly.
+
+Reasons over Fastify:
+- Larger ecosystem, less surprise for collaborators.
+- Fastify's default `.listen` binds to `localhost`, not `0.0.0.0`; Render explicitly calls this out as a setup pitfall ("Fastify's `.listen` method default binding uses `localhost` (`127.0.0.1`), whereas Render requires `0.0.0.0`", `deploy-node-fastify-app.md:5-7`). Express avoids that footgun.
+
+---
+
+## 3. New files and where they live
+
+The repo is effectively a monorepo: two roots (`scif-slack-bot/` Python, `mvp/` JS) with separate `requirements.txt` / `package.json`. Render supports this directly — set a per-service `rootDir` to "ignore file changes _outside_ that directory" (`monorepo-support.md:30-36`). The existing worker already does so (`rootDir: scif-slack-bot`).
+
+```
+scifxaic/
+├── render.yaml                 # extended (see §5)
+├── render.md                   # this file
+│
+├── scif-slack-bot/             # existing Python worker dir
+│   ├── api.py                  # NEW — FastAPI app, imports existing modules
+│   ├── requirements.txt        # add: fastapi, uvicorn[standard]
+│   ├── alerts.py
+│   ├── digest.py
+│   ├── classifier.py
+│   ├── news_fetcher.py
+│   ├── subscriptions.py
+│   ├── scheduler.py
+│   ├── main.py                 # untouched — still entry point for worker
+│   └── ...
+│
+└── mvp/                        # existing JS CLI dir
+    ├── package.json            # add: express
+    └── src/
+        ├── server.js           # NEW — Express app, imports existing modules
+        ├── run.js              # untouched — still CLI loop entry
+        ├── classify.js
+        ├── dispatch.js
+        ├── finnhub.js
+        ├── tools.js
+        └── ...
+```
+
+No existing files move. The HTTP entry points (`api.py`, `server.js`) are pure adapters: they import the already-exported functions and bind them to routes.
+
+---
+
+## 4. Function-to-route mapping
+
+Method/path choices below follow REST conventions. Bodies are JSON.
+
+### 4.1 Python (`scif-slack-bot/api.py`, FastAPI)
+
+| Function (source) | Method + Path | Body / Query | Notes |
+|---|---|---|---|
+| `classifier.classify_news(...)` | `POST /classify` | `{company, ticker, sector, thesis, headline, summary}` | Pure function; ideal endpoint candidate. Returns `{material, verdict, urgent, event_type, explanation}` or 502 on Gemini failure. |
+| `news_fetcher.fetch_company_news(ticker, days_back)` | `GET /news/{ticker}?days_back=1` | path + query | Thin Finnhub proxy. |
+| `alerts.build_alert_blocks(...)` | `POST /alerts/preview` | alert payload | Returns Slack Block Kit JSON without posting. |
+| `alerts.format_alert_text(...)` | `POST /alerts/preview-text` | alert payload | Plain-text variant. |
+| `alerts.send_instant_alert(...)` | `POST /alerts/instant` | alert payload + optional `channel` | Posts to Slack channel; needs `SLACK_BOT_TOKEN` in env. |
+| `alerts.send_dm_alert(user_id, ...)` | `POST /alerts/dm/{user_id}` | alert payload | DMs a single analyst. |
+| `digest.build_digest_blocks/text(...)` | `POST /digest/preview` | `{events, month_label?}` | Returns Block Kit or text without posting. |
+| `digest.send_monthly_digest(events, ...)` | `POST /digest/send` | `{events, channel?, month_label?}` | Posts digest to Slack. |
+| `subscriptions.subscribe(user_id, sector)` | `POST /subscriptions/{user_id}` | `{sector}` | |
+| `subscriptions.subscribe_all(user_id)` | `POST /subscriptions/{user_id}/all` | — | |
+| `subscriptions.unsubscribe(user_id, sector)` | `DELETE /subscriptions/{user_id}/{sector}` | — | |
+| `subscriptions.unsubscribe_all(user_id)` | `DELETE /subscriptions/{user_id}` | — | |
+| `subscriptions.get_subscriptions(user_id)` | `GET /subscriptions/{user_id}` | — | |
+| `subscriptions.get_subscribers_for_sector(sector)` | `GET /subscribers?sector=...` | query | |
+| `scheduler.poll_news(client)` | `POST /admin/poll` | — | Manual trigger; instantiates a Slack `WebClient` server-side. Protect (see §6.3). |
+| `scheduler.send_daily_digest(client)` | `POST /admin/digest` | — | Manual trigger. Protect. |
+| `main.run_mock_demo()` | `POST /admin/demo` | — | Dry-run smoke test. Protect. |
+
+Skeleton (FastAPI + uvicorn, exactly as documented in `deploy-fastapi.md:14`):
+
+```python
+# scif-slack-bot/api.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+
+from classifier import classify_news
+from news_fetcher import fetch_company_news
+from alerts import send_instant_alert, build_alert_blocks
+from digest import send_monthly_digest, build_digest_blocks
+from subscriptions import (
+    subscribe, subscribe_all, unsubscribe, unsubscribe_all,
+    get_subscriptions, get_subscribers_for_sector,
+)
+
+app = FastAPI()
+
+class ClassifyRequest(BaseModel):
+    company: str
+    ticker: str
+    sector: str
+    thesis: str
+    headline: str
+    summary: str = ""
+
+@app.post("/classify")
+def classify(req: ClassifyRequest):
+    result = classify_news(**req.model_dump())
+    if result is None:
+        raise HTTPException(status_code=502, detail="classifier unavailable")
+    return result
+
+# ... remaining routes follow the same pattern
+```
+
+Start command (per `deploy-fastapi.md:14`): `uvicorn api:app --host 0.0.0.0 --port $PORT`.
+
+### 4.2 JS (`mvp/src/server.js`, Express)
+
+| Function (source) | Method + Path | Body / Query | Notes |
+|---|---|---|---|
+| `finnhub.pollFinnhub()` | `POST /poll` | — | Triggers one Finnhub poll cycle. |
+| `classify.classifyNext()` | `POST /classify/next` | — | Classifies the oldest pending article. |
+| `classify.classifyAllPending()` | `POST /classify/all` | — | Drains the pending queue. Long-running — see §6.4. |
+| `dispatch.dispatchOne(article)` | `POST /dispatch/one` | `{article}` | |
+| `dispatch.dispatchAll()` | `POST /dispatch/all` | — | |
+| `tools.get_thesis({ticker})` | `GET /thesis/{ticker}` | path | Already structured as a tool — wrap by calling its handler. |
+| `tools.get_recent_classifications({ticker, limit})` | `GET /classifications/{ticker}?limit=N` | path + query | |
+| `tools.fetch_article_body({article_id})` | `GET /articles/{article_id}/body` | path | |
+| `tools.classify_article({article_id, label, rationale})` | `POST /articles/{article_id}/classify` | `{label, rationale}` | Writes DB row + markdown file. |
+
+Skeleton (Express, matches the start command convention in `deploy-node-express-app.md:14-22`):
+
+```javascript
+// mvp/src/server.js
+import express from 'express';
+import { config as loadEnv } from 'dotenv';
+loadEnv({ override: true });
+
+import { pollFinnhub } from './finnhub.js';
+import { classifyNext, classifyAllPending } from './classify.js';
+import { dispatchOne, dispatchAll } from './dispatch.js';
+
+const app = express();
+app.use(express.json());
+
+app.post('/poll', async (_req, res) => {
+  try {
+    const inserted = await pollFinnhub();
+    res.json({ inserted });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+app.post('/classify/next', async (_req, res) => {
+  const result = await classifyNext();
+  res.json(result ?? { status: 'no pending articles' });
+});
+
+// ... remaining routes
+
+const port = Number(process.env.PORT || 10000);
+app.listen(port, '0.0.0.0', () => console.log(`server on :${port}`));
+```
+
+The explicit `'0.0.0.0'` bind is required per the web-service port-binding rule (`web-services.md:7-9`). Default expected port is `10000`; Render also sets `$PORT` in the runtime environment, which the snippet honors.
+
+---
+
+## 5. `render.yaml` changes
+
+Current file (worker only):
+
+```yaml
+services:
+  - type: worker
+    name: scif-slack-bot
+    runtime: python
+    rootDir: scif-slack-bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: SLACK_CHANNEL_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+```
+
+Extended file (worker + two web services). Field syntax follows `blueprint-spec.md:13-65`:
+
+```yaml
+services:
+  # 1. Existing Slack-bot worker — unchanged.
+  - type: worker
+    name: scif-slack-bot
+    runtime: python
+    rootDir: scif-slack-bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: SLACK_CHANNEL_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+
+  # 2. NEW — Python HTTP surface (FastAPI).
+  - type: web
+    name: scif-api
+    runtime: python
+    rootDir: scif-slack-bot
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /docs
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_CHANNEL_ID
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: API_AUTH_TOKEN
+        sync: false        # see §6.3
+
+  # 3. NEW — JS HTTP surface (Express).
+  - type: web
+    name: scif-mvp-api
+    runtime: node
+    rootDir: mvp
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /
+    envVars:
+      - key: FINNHUB_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: API_AUTH_TOKEN
+        sync: false
+```
+
+Notes on the new fields:
+
+- `type: web` plus the start command/host/port comes straight from `deploy-fastapi.md:14` (Python) and `deploy-node-express-app.md:14-22` (JS).
+- `rootDir` scopes builds and redeploys to one subtree of the monorepo (`monorepo-support.md:30-36`).
+- `healthCheckPath` is listed in `blueprint-spec.md:81` and is highly recommended for web services. `/docs` exists automatically on FastAPI; for Express, add a tiny `GET /` returning `200`.
+- `sync: false` causes Render to "prompt for a value in the Render Dashboard" instead of committing the secret (`blueprint-spec.md:49`). Same pattern the existing worker already uses.
+- Public access can be disabled per service with `renderSubdomainPolicy: disabled` (`blueprint-spec.md:42`) if the team wants endpoints reachable only via custom domains.
+
+To make `scif-api` reachable _only_ by other Render services (not the public internet), change `type: web` to `type: pserv` (private service). Per `private-services.md:1-12`, private services are "just like web services" but skip the `onrender.com` subdomain.
+
+---
+
+## 6. Shared code, auth, and config concerns
+
+### 6.1 Environment variables and secrets
+
+Both new services need every secret the existing worker uses (Slack tokens, Finnhub key, Gemini key, OpenAI key). Declare them under each service's `envVars` with `sync: false`, exactly as the current worker does (`blueprint-spec.md:43-49`). Render will prompt for values on first deploy.
+
+If many services will share the same secret set, factor them into an environment group and reference with `fromGroup` (`blueprint-spec.md:59`).
+
+### 6.2 Ephemeral filesystem — affects `subscriptions.json`, `seen_articles.json`, `digest_queue.json`, and `data/` SQLite
+
+Render's default filesystem is ephemeral: "without a persistent disk, any changes you make to a service's local files are _lost_ every time the service redeploys or restarts" (`disks.md:1-7`).
+
+Today the Python bot persists state via three JSON files (`subscriptions.py:22`, `scheduler.py:33-34`). The JS MVP persists state in a local SQLite DB (`mvp/src/db.js`). On the existing worker this already loses data on every deploy.
+
+Options:
+1. **Persistent disk** — paid feature, attach to one service and mount at e.g. `/var/data`. "Persistent disks use the same high-performance SSDs as Render Postgres and Key Value instances" (`disks.md:18`). Important: a disk can only be attached to one service. If both the worker _and_ the new web service need to read/write the same `subscriptions.json`, the disk must live on whichever one writes it, and the other must reach it some other way — which it can't, because workers expose nothing.
+2. **Move state into Render Postgres or Render Key Value** — listed as managed datastores in `service-types.md:141-145`. Recommended for any state that more than one service touches. Subscriptions, seen-article IDs, and the digest queue are all natural Postgres rows.
+3. **Tolerate ephemerality** during the migration and treat the JSON files as cache only.
+
+Recommended: migrate `subscriptions.json` and `digest_queue.json` to Postgres before promoting the new web service to a source of truth. Until then, keep all writes on the worker and have the web service treat writes as best-effort.
+
+### 6.3 Authentication
+
+None of the catalogued functions check identity today. Once exposed on a public `onrender.com` URL, they become callable by anyone on the internet. At minimum:
+
+- Require a shared secret header (e.g. `X-API-Token`) checked against `API_AUTH_TOKEN` in `envVars`. `generateValue: true` in `blueprint-spec.md:46` will have Render mint "a base64-encoded 256-bit value" automatically.
+- For endpoints that send Slack messages or trigger LLM spend (`/alerts/*`, `/digest/send`, `/classify`, `/admin/*`), this is mandatory — they cost real money per call.
+- If endpoints are only ever consumed by other Render services, switch the new service to `type: pserv` (`private-services.md`) so the public internet cannot reach them at all.
+- Optionally use `ipAllowList` (`blueprint-spec.md:60-64`) to limit callers to known office/CI IPs (Scale + Enterprise plans only).
+
+### 6.4 Long-running endpoints
+
+`scheduler.poll_news` and `classify.classifyAllPending` can each run for minutes (Gemini rate-limit sleeps, multiple Finnhub fetches). Render web services do support long requests, but endpoints that may exceed a request budget should:
+
+- Return `202 Accepted` immediately, kick off work in a background task (FastAPI's `BackgroundTasks`, or `setImmediate` in Express), and write status somewhere queryable.
+- Or be replaced by a Render **cron job** that runs on a schedule (`service-types.md:117-123`) and a small HTTP endpoint that only reports progress.
+
+### 6.5 Scheduler thread vs. web service
+
+The existing worker calls `start_scheduler(slack_client)` from `main.py:81`, which spawns a daemon thread (`scheduler.py:199-204`) that polls Finnhub every 15 minutes. Do **not** also start the scheduler inside `api.py` — that would double-poll. Keep `main.py` (worker) as the only place that owns the scheduler. The web service should be a read/write surface over the same code, not a second copy of the loop.
+
+If we want manual `/admin/poll` and `/admin/digest` endpoints to share state with the worker (seen-article IDs, digest queue), those state files must live on shared storage — which on Render means Postgres or Key Value (see §6.2). The web service cannot read the worker's local filesystem.
+
+### 6.6 Auto-deploys per subdirectory
+
+The two new services build off `rootDir: scif-slack-bot` and `rootDir: mvp` respectively. Per `monorepo-support.md:30-36`, this already prevents JS changes from triggering Python rebuilds and vice versa. No additional build filters needed unless we later add more subprojects.
+
+### 6.7 CORS
+
+If a future frontend at `index.html` / `src/` (Vite app) calls these endpoints from a browser, enable CORS:
+- FastAPI: `from fastapi.middleware.cors import CORSMiddleware`.
+- Express: `app.use(cors({ origin: ALLOWED_ORIGINS }))`.
+
+Lock the allowlist to the static-site domain rather than `*`.
+
+---
+
+## 7. Migration order (suggested)
+
+1. Add `fastapi`, `uvicorn[standard]` to `scif-slack-bot/requirements.txt`. Add `express` to `mvp/package.json`.
+2. Create `scif-slack-bot/api.py` with a single route (`/classify`) and `mvp/src/server.js` with `/poll`. Verify locally on `:10000`.
+3. Update `render.yaml` to add the two `type: web` services (§5). Push.
+4. In the Render Dashboard, fill in the prompted `sync: false` secrets for the new services on first deploy.
+5. Add `API_AUTH_TOKEN` enforcement (§6.3) before adding any state-mutating routes.
+6. Migrate `subscriptions.json` and `digest_queue.json` to Postgres (§6.2) before the web service is allowed to write to them.
+7. Add remaining routes from the §4 tables, one feature at a time.
+
+---
+
+## 8. Reference index
+
+| Topic | Source |
+|---|---|
+| Service types overview, decision flowchart | `render_docs/service-types.md` |
+| Web service port binding (`0.0.0.0`, default `10000`) | `render_docs/web-services.md` |
+| FastAPI quickstart and start command | `render_docs/deploy-fastapi.md` |
+| Flask quickstart (alternative) | `render_docs/deploy-flask.md` |
+| Express quickstart | `render_docs/deploy-node-express-app.md` |
+| Fastify quickstart and `0.0.0.0` gotcha | `render_docs/deploy-node-fastify-app.md` |
+| Private services (internal-only HTTP) | `render_docs/private-services.md` |
+| `render.yaml` field reference (envVars, sync, fromGroup, healthCheckPath, ipAllowList, renderSubdomainPolicy) | `render_docs/blueprint-spec.md` |
+| Multi-service architecture pattern | `render_docs/multi-service-architecture.md` |
+| Monorepo support (`rootDir`, build filters) | `render_docs/monorepo-support.md` |
+| Persistent disks vs. ephemeral filesystem | `render_docs/disks.md` |
