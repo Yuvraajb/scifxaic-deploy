@@ -2,6 +2,28 @@
 -- Ports mvp/src/db.js (SQLite) to Supabase Postgres, plus subscriptions.
 -- Three labels only: HIGH_ALERT | MONTHLY_OVERVIEW | IGNORE. No embeddings.
 --
+-- ---------------------------------------------------------------------------
+-- Reset: drop the legacy embeddings-based schema (May-3 design) so this
+-- project's simplified, no-embeddings model becomes the single source of
+-- truth. Only test-seed data existed; no production rows. CASCADE clears
+-- the FK web (chunks -> decks, matches -> pillars/news_items, etc).
+-- ---------------------------------------------------------------------------
+drop table if exists public.pitch_deck_chunks     cascade;
+drop table if exists public.slide_items           cascade;
+drop table if exists public.pitch_decks           cascade;
+drop table if exists public.pulse_alerts          cascade;
+drop table if exists public.thesis_matches        cascade;
+drop table if exists public.thesis_pillars        cascade;
+drop table if exists public.filing_chunks         cascade;
+drop table if exists public.filings               cascade;
+drop table if exists public.news_articles         cascade;
+drop table if exists public.news_items            cascade;
+drop table if exists public.sector_assignments    cascade;
+drop table if exists public.notification_channels cascade;
+drop table if exists public.subscriptions         cascade;
+drop table if exists public.portfolio_companies   cascade;
+drop table if exists public.users                 cascade;
+
 -- RLS rationale (supabase_docs/guides/database/postgres/row-level-security.md):
 --   "RLS must always be enabled on any tables stored in an exposed schema."
 --   The React frontend reads these tables from the browser with the anon key,
