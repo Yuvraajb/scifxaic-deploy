@@ -203,7 +203,10 @@ async function handleSubscribeCommand({ command, ack, client }) {
 
   let savedSectors = [];
   try {
-    savedSectors = await getSectorsForSlackUser(command.user_id);
+    savedSectors = await Promise.race([
+      getSectorsForSlackUser(command.user_id),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500)),
+    ]);
   } catch (err) {
     console.error('[SUBSCRIBE LOAD ERROR]', err.message);
   }
