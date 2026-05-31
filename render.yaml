@@ -1,43 +1,22 @@
 services:
-  # Node worker — the single poller + classification agent + Slack notifier.
-  # Polls Finnhub, classifies via the LangChain agent, writes to Supabase, and
-  # posts HIGH_ALERT articles to Slack.
-  - type: worker
-    name: scif-classifier
+  - type: web
+    name: scifxaic
     runtime: node
-    rootDir: classifier
+    plan: free
     buildCommand: npm ci
     startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
     envVars:
-      - key: FINNHUB_API_KEY
+      - key: NODE_ENV
+        value: production
+      - key: SLACK_SIGNING_SECRET
         sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: LLM_MODEL
+      - key: SLACK_BOT_TOKEN
         sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
-      - key: SLACK_BOT_TOKEN
-        sync: false
-      - key: SLACK_CHANNEL_ID
-        sync: false
-
-  # Python worker — Slack command surface only (/subscribe etc.) over Socket
-  # Mode. No polling or classifying; reads/writes the Supabase subscriptions table.
-  - type: worker
-    name: scif-slack-bot
-    runtime: python
-    rootDir: slack-bot
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
-    envVars:
-      - key: SLACK_BOT_TOKEN
-        sync: false
-      - key: SLACK_APP_TOKEN
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_ROLE_KEY
+      - key: GROQ_API_KEY
         sync: false
