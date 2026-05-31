@@ -4,14 +4,11 @@ News-to-Slack pipeline for the Student Investment Fund. One Finnhub poller, one
 LangChain classification agent, one Slack command surface, one React dashboard —
 all sharing a single Supabase project as the source of truth.
 
-> Architecture rationale and migration history: [`combine.md`](combine.md).
-> Render endpoint plan: [`render.md`](render.md).
-
 ---
 
 ## Layout
 
-This repo holds **three deployable pieces** plus shared docs. Each piece is
+This repo holds **three deployable pieces**. Each piece is
 self-contained with its own runtime and dependency manifest.
 
 ```
@@ -38,7 +35,7 @@ They are **one project, two processes**. The classifier is the only thing that
 polls and classifies; the Slack bot is a pure command surface. They never call
 each other in-process — they coordinate through the shared Supabase tables. That
 is why they remain distinct services with distinct languages rather than one
-binary. See [`combine.md`](combine.md) for the full reasoning.
+binary.
 
 ---
 
@@ -66,8 +63,6 @@ cd classifier && npm ci && cp .env.example .env && npm start
 cd slack-bot && python -m venv venv && source venv/bin/activate \
   && pip install -r requirements.txt && cp .env.example .env && python main.py
 ```
-
-Per-service setup detail lives in [`slack-bot/README.md`](slack-bot/README.md).
 
 ---
 
