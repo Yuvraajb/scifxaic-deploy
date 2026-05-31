@@ -28,6 +28,11 @@ slack-bot/digest_queue.json
 .claude/
 supabase/.temp/
 
+# Planning/design docs — kept local, not pushed to the remote
+combine.md
+render.md
+markdown_docs_build/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
