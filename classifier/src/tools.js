@@ -6,34 +6,32 @@
 //   with snake_case names ("Sticking to alphanumeric characters, underscores, and hyphens
 //   helps to improve compatibility across providers.").
 //
-// All four tools share module-level access to `db` and `dispatchOne`. They are
-// stateless across calls; per-row state is reconstructed each time by the agent
-// passing `article_id`/`ticker` arguments.
+// Handlers are async because the backing store is Supabase (network calls).
+// Per-row state is reconstructed each call from the article_id/ticker arguments.
 
 import { tool } from 'langchain';
 import { z } from 'zod';
-import { db } from './db.js';
+import {
+  getThesis,
+  getRecentClassifications,
+  getArticleBasic,
+  loadFullArticle,
+  getArticleClassification,
+  markClassification,
+} from './repo.js';
 import { dispatchOne } from './dispatch.js';
 
 // ─── get_thesis(ticker) ───────────────────────────────────────────────────────
-const getThesisSql = db.prepare(`
-  select t.structured_json, c.ticker, c.name
-  from theses t
-  join companies c on c.id = t.company_id
-  where c.ticker = ? and t.active = 1
-`);
-
 export const get_thesis = tool(
-  ({ ticker }) => {
-    const row = getThesisSql.get(ticker);
-    if (!row) {
+  async ({ ticker }) => {
+    const result = await getThesis(ticker);
+    if (!result) {
       return `No active thesis found for ticker ${ticker}.`;
     }
-    const parsed = JSON.parse(row.structured_json);
     return {
-      ticker: row.ticker,
-      company: row.name,
-      thesis: parsed,
+      ticker: result.ticker,
+      company: result.name,
+      thesis: result.thesis,
     };
   },
   {
@@ -49,30 +47,14 @@ export const get_thesis = tool(
 );
 
 // ─── get_recent_classifications(ticker, limit) ────────────────────────────────
-const getRecentSql = db.prepare(`
-  select a.id, a.headline, a.classification as label, a.rationale, a.classified_at
-  from articles a
-  join companies c on c.id = a.company_id
-  where c.ticker = ?
-    and a.classification is not null
-  order by a.classified_at desc
-  limit ?
-`);
-
 export const get_recent_classifications = tool(
-  ({ ticker, limit }) => {
+  async ({ ticker, limit }) => {
     const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 25) : 5;
-    const rows = getRecentSql.all(ticker, n);
+    const rows = await getRecentClassifications(ticker, n);
     if (rows.length === 0) {
       return `No prior classifications for ${ticker}.`;
     }
-    return rows.map((r) => ({
-      article_id: r.id,
-      headline: r.headline,
-      label: r.label,
-      rationale: r.rationale,
-      classified_at: r.classified_at,
-    }));
+    return rows;
   },
   {
     name: 'get_recent_classifications',
@@ -88,17 +70,14 @@ export const get_recent_classifications = tool(
 
 // ─── fetch_article_body(article_id) ───────────────────────────────────────────
 // Per finnhub_docs/company-news.md the only free-tier news endpoint returns
-// headline + summary + url; no body field. newsroom and press-releases fields
-// (`fullText`, full description) are Enterprise-gated and return 403 on our key.
-// This tool exists for the agent to ASK for a body; it must fail gracefully and
-// tell the agent that the only available text is what was passed in.
+// headline + summary + url; no body field. This tool exists for the agent to
+// ASK for a body; it fails gracefully and tells the agent to decide from the
+// headline + summary already provided.
 export const fetch_article_body = tool(
-  ({ article_id }) => {
-    const row = db
-      .prepare('select id, headline, summary, url from articles where id = ?')
-      .get(article_id);
+  async ({ article_id }) => {
+    const row = await getArticleBasic(article_id);
     if (!row) {
-      return `Article ${article_id} not found in the local database.`;
+      return `Article ${article_id} not found in the database.`;
     }
     return (
       `Full article body is not available on the current Finnhub plan. ` +
@@ -117,7 +96,7 @@ export const fetch_article_body = tool(
       article_id: z
         .number()
         .int()
-        .describe('Numeric id of the article row in the local database.'),
+        .describe('Numeric id of the article row in the database.'),
     }),
   }
 );
@@ -125,48 +104,32 @@ export const fetch_article_body = tool(
 // ─── classify_article(article_id, label, rationale) ───────────────────────────
 const LABELS = ['HIGH_ALERT', 'MONTHLY_OVERVIEW', 'IGNORE'];
 
-const updateClassificationSql = db.prepare(`
-  update articles
-  set classification = ?, rationale = ?, classified_at = current_timestamp
-  where id = ?
-`);
-const loadFullArticleSql = db.prepare(`
-  select a.*, c.ticker
-  from articles a
-  join companies c on c.id = a.company_id
-  where a.id = ?
-`);
-
 export const classify_article = tool(
-  ({ article_id, label, rationale }) => {
+  async ({ article_id, label, rationale }) => {
     if (!LABELS.includes(label)) {
       return `Error: invalid label "${label}". Must be one of: ${LABELS.join(', ')}. Call classify_article again with a valid label.`;
     }
     if (!rationale || rationale.trim().length === 0) {
       return `Error: rationale is required. Call classify_article again with a non-empty rationale.`;
     }
-    const existing = loadFullArticleSql.get(article_id);
+    const existing = await loadFullArticle(article_id);
     if (!existing) {
       return `Error: article ${article_id} not found.`;
     }
     if (existing.classification) {
       return `Article ${article_id} was already classified as ${existing.classification}. No-op.`;
     }
-    updateClassificationSql.run(label, rationale, article_id);
-    const refreshed = loadFullArticleSql.get(article_id);
-    // dispatchOne writes to the per-label markdown file immediately and sets dispatched_at.
-    dispatchOne({
-      ...refreshed,
-      classification: label,
-      rationale,
-    });
+    await markClassification(article_id, label, rationale);
+    // dispatchOne posts HIGH_ALERT to Slack, writes the audit log, and sets
+    // dispatched_at — all in one step.
+    await dispatchOne({ ...existing, classification: label, rationale });
     return `Recorded article ${article_id} (${existing.ticker}) as ${label}. You are done; do not call any more tools.`;
   },
   {
     name: 'classify_article',
     description:
       'Record the final classification verdict for an article. ' +
-      'This tool writes the label + rationale to the database and appends to the matching markdown file. ' +
+      'This tool writes the label + rationale to the database and dispatches the result. ' +
       'Call this exactly once per article, as the LAST step of your turn. ' +
       'Valid labels: HIGH_ALERT (material to thesis AND time-sensitive), ' +
       'MONTHLY_OVERVIEW (thesis-relevant but not urgent), ' +

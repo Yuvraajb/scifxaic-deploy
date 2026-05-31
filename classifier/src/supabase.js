@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 
-// Server-side client for the mvp worker. Uses the service_role key, which
+// Server-side client for the classifier worker. Uses the service_role key, which
 // BYPASSES RLS (supabase_docs/guides/database/postgres/row-level-security.md:
 // "Supabase provides special 'Service' keys, which can be used to bypass RLS.
 // These should never be used in the browser"). Safe here because the worker

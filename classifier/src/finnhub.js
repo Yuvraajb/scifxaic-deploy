@@ -1,7 +1,7 @@
 import { config as loadEnv } from 'dotenv';
 loadEnv({ override: true });
 import axios from 'axios';
-import { db } from './db.js';
+import { getActiveCompanies, insertArticle } from './repo.js';
 
 // Per finnhub_docs/company-news.md (free, NA-only):
 //   GET /api/v1/company-news?symbol&from&to&token
@@ -20,21 +20,13 @@ async function fetchCompanyNews(ticker, fromDate, toDate) {
   return res.data ?? [];
 }
 
-const insertArticle = db.prepare(`
-  insert or ignore into articles
-    (company_id, source, source_event_id, headline, summary, url, published_at, raw_json)
-  values (?, 'finnhub_company_news', ?, ?, ?, ?, ?, ?)
-`);
-
 export async function pollFinnhub() {
   const today = new Date();
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const tickers = db
-    .prepare('select id, ticker from companies where active = 1')
-    .all();
+  const companies = await getActiveCompanies();
 
   let inserted = 0;
-  for (const c of tickers) {
+  for (const c of companies) {
     try {
       const allItems = await fetchCompanyNews(c.ticker, ymd(yesterday), ymd(today));
       // Newest first; take MAX_PER_TICKER.
@@ -42,16 +34,17 @@ export async function pollFinnhub() {
         .sort((a, b) => (b.datetime ?? 0) - (a.datetime ?? 0))
         .slice(0, MAX_PER_TICKER);
       for (const it of items) {
-        const result = insertArticle.run(
-          c.id,
-          String(it.id),
-          it.headline ?? '(no headline)',
-          it.summary ?? '',
-          it.url ?? '',
-          new Date(it.datetime * 1000).toISOString(),
-          JSON.stringify(it)
-        );
-        if (result.changes > 0) inserted++;
+        const wasInserted = await insertArticle({
+          company_id: c.id,
+          source: 'finnhub_company_news',
+          source_event_id: String(it.id),
+          headline: it.headline ?? '(no headline)',
+          summary: it.summary ?? '',
+          url: it.url ?? '',
+          published_at: new Date(it.datetime * 1000).toISOString(),
+          raw_json: it, // jsonb column — store the object, not a string
+        });
+        if (wasInserted) inserted++;
       }
       console.log(`finnhub: ${c.ticker} -> ${allItems.length} returned, ${items.length} kept (cap ${MAX_PER_TICKER})`);
       await new Promise((r) => setTimeout(r, 250)); // pace under 30 req/s

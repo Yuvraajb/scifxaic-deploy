@@ -11,7 +11,7 @@ All Render guidance below is sourced strictly from this repo's `render_docs/` fo
 Render has no function-as-a-service / serverless offering. Per `service-types.md`, the only ways to run code on Render are: web service, static site, private service, background worker, cron job, or workflow (`service-types.md:1-12`).
 
 - A **web service** is "the most common service type. Dynamic web apps with a public `onrender.com` subdomain for receiving traffic over HTTP" (`service-types.md:68-72`).
-- A **background worker** runs "internal apps that run continuously... Background workers do _not_ expose a URL or internal hostname" (`service-types.md:106-115`). This is what `render.yaml` currently uses for `scif-slack-bot`.
+- A **background worker** runs "internal apps that run continuously... Background workers do *not* expose a URL or internal hostname" (`service-types.md:106-115`). This is what `render.yaml` currently uses for `scif-slack-bot`.
 - A **private service** is "just like a web service" but only reachable on Render's private network (`private-services.md:1-12`). Useful if endpoints should only be callable from other Render services, not the public internet.
 
 To expose any Python or JS function as an endpoint, it must be served by a long-running HTTP process inside a `type: web` (public) or `type: pserv` (private) service. Every web service "must bind to a port on host `0.0.0.0` to serve HTTP requests. The default expected port is `10000`" (`web-services.md` port-binding note, lines 7-9).
@@ -27,6 +27,7 @@ Use **FastAPI** for `scif-slack-bot/` endpoints.
 Render documents FastAPI as a first-class supported framework in `deploy-fastapi.md`. The recommended start command from that doc is `uvicorn main:app --host 0.0.0.0 --port $PORT` (`deploy-fastapi.md:10-15`), which satisfies the `0.0.0.0` binding requirement in `web-services.md`.
 
 Reasons over Flask:
+
 - Native async — matches the existing `requests` / Slack-bot pattern without adding a WSGI server like Gunicorn (Flask's recommended start command is `gunicorn app:app`, `deploy-flask.md:23-30`).
 - Pydantic models give the team request/response schemas for free, mirroring the existing JSON-shaped tool I/O in `classifier.py`.
 - Auto-generates OpenAPI / `/docs` UI — useful for CS1/CS2 teammates who already import these functions today.
@@ -40,6 +41,7 @@ Use **Express** for `mvp/src/` endpoints.
 Render documents Express in `deploy-node-express-app.md` with `Language: Node`, `Build Command: yarn` (or `npm install`), `Start Command: node app.js` (`deploy-node-express-app.md:14-22`). The existing `mvp/package.json` already uses `"type": "module"` and Node, so Express drops in cleanly.
 
 Reasons over Fastify:
+
 - Larger ecosystem, less surprise for collaborators.
 - Fastify's default `.listen` binds to `localhost`, not `0.0.0.0`; Render explicitly calls this out as a setup pitfall ("Fastify's `.listen` method default binding uses `localhost` (`127.0.0.1`), whereas Render requires `0.0.0.0`", `deploy-node-fastify-app.md:5-7`). Express avoids that footgun.
 
@@ -47,7 +49,7 @@ Reasons over Fastify:
 
 ## 3. New files and where they live
 
-The repo is effectively a monorepo: two roots (`scif-slack-bot/` Python, `mvp/` JS) with separate `requirements.txt` / `package.json`. Render supports this directly — set a per-service `rootDir` to "ignore file changes _outside_ that directory" (`monorepo-support.md:30-36`). The existing worker already does so (`rootDir: scif-slack-bot`).
+The repo is effectively a monorepo: two roots (`scif-slack-bot/` Python, `mvp/` JS) with separate `requirements.txt` / `package.json`. Render supports this directly — set a per-service `rootDir` to "ignore file changes *outside* that directory" (`monorepo-support.md:30-36`). The existing worker already does so (`rootDir: scif-slack-bot`).
 
 ```
 scifxaic/
@@ -88,25 +90,27 @@ Method/path choices below follow REST conventions. Bodies are JSON.
 
 ### 4.1 Python (`scif-slack-bot/api.py`, FastAPI)
 
-| Function (source) | Method + Path | Body / Query | Notes |
-|---|---|---|---|
-| `classifier.classify_news(...)` | `POST /classify` | `{company, ticker, sector, thesis, headline, summary}` | Pure function; ideal endpoint candidate. Returns `{material, verdict, urgent, event_type, explanation}` or 502 on Gemini failure. |
-| `news_fetcher.fetch_company_news(ticker, days_back)` | `GET /news/{ticker}?days_back=1` | path + query | Thin Finnhub proxy. |
-| `alerts.build_alert_blocks(...)` | `POST /alerts/preview` | alert payload | Returns Slack Block Kit JSON without posting. |
-| `alerts.format_alert_text(...)` | `POST /alerts/preview-text` | alert payload | Plain-text variant. |
-| `alerts.send_instant_alert(...)` | `POST /alerts/instant` | alert payload + optional `channel` | Posts to Slack channel; needs `SLACK_BOT_TOKEN` in env. |
-| `alerts.send_dm_alert(user_id, ...)` | `POST /alerts/dm/{user_id}` | alert payload | DMs a single analyst. |
-| `digest.build_digest_blocks/text(...)` | `POST /digest/preview` | `{events, month_label?}` | Returns Block Kit or text without posting. |
-| `digest.send_monthly_digest(events, ...)` | `POST /digest/send` | `{events, channel?, month_label?}` | Posts digest to Slack. |
-| `subscriptions.subscribe(user_id, sector)` | `POST /subscriptions/{user_id}` | `{sector}` | |
-| `subscriptions.subscribe_all(user_id)` | `POST /subscriptions/{user_id}/all` | — | |
-| `subscriptions.unsubscribe(user_id, sector)` | `DELETE /subscriptions/{user_id}/{sector}` | — | |
-| `subscriptions.unsubscribe_all(user_id)` | `DELETE /subscriptions/{user_id}` | — | |
-| `subscriptions.get_subscriptions(user_id)` | `GET /subscriptions/{user_id}` | — | |
-| `subscriptions.get_subscribers_for_sector(sector)` | `GET /subscribers?sector=...` | query | |
-| `scheduler.poll_news(client)` | `POST /admin/poll` | — | Manual trigger; instantiates a Slack `WebClient` server-side. Protect (see §6.3). |
-| `scheduler.send_daily_digest(client)` | `POST /admin/digest` | — | Manual trigger. Protect. |
-| `main.run_mock_demo()` | `POST /admin/demo` | — | Dry-run smoke test. Protect. |
+
+| Function (source)                                    | Method + Path                              | Body / Query                                           | Notes                                                                                                                             |
+| ---------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `classifier.classify_news(...)`                      | `POST /classify`                           | `{company, ticker, sector, thesis, headline, summary}` | Pure function; ideal endpoint candidate. Returns `{material, verdict, urgent, event_type, explanation}` or 502 on Gemini failure. |
+| `news_fetcher.fetch_company_news(ticker, days_back)` | `GET /news/{ticker}?days_back=1`           | path + query                                           | Thin Finnhub proxy.                                                                                                               |
+| `alerts.build_alert_blocks(...)`                     | `POST /alerts/preview`                     | alert payload                                          | Returns Slack Block Kit JSON without posting.                                                                                     |
+| `alerts.format_alert_text(...)`                      | `POST /alerts/preview-text`                | alert payload                                          | Plain-text variant.                                                                                                               |
+| `alerts.send_instant_alert(...)`                     | `POST /alerts/instant`                     | alert payload + optional `channel`                     | Posts to Slack channel; needs `SLACK_BOT_TOKEN` in env.                                                                           |
+| `alerts.send_dm_alert(user_id, ...)`                 | `POST /alerts/dm/{user_id}`                | alert payload                                          | DMs a single analyst.                                                                                                             |
+| `digest.build_digest_blocks/text(...)`               | `POST /digest/preview`                     | `{events, month_label?}`                               | Returns Block Kit or text without posting.                                                                                        |
+| `digest.send_monthly_digest(events, ...)`            | `POST /digest/send`                        | `{events, channel?, month_label?}`                     | Posts digest to Slack.                                                                                                            |
+| `subscriptions.subscribe(user_id, sector)`           | `POST /subscriptions/{user_id}`            | `{sector}`                                             |                                                                                                                                   |
+| `subscriptions.subscribe_all(user_id)`               | `POST /subscriptions/{user_id}/all`        | —                                                      |                                                                                                                                   |
+| `subscriptions.unsubscribe(user_id, sector)`         | `DELETE /subscriptions/{user_id}/{sector}` | —                                                      |                                                                                                                                   |
+| `subscriptions.unsubscribe_all(user_id)`             | `DELETE /subscriptions/{user_id}`          | —                                                      |                                                                                                                                   |
+| `subscriptions.get_subscriptions(user_id)`           | `GET /subscriptions/{user_id}`             | —                                                      |                                                                                                                                   |
+| `subscriptions.get_subscribers_for_sector(sector)`   | `GET /subscribers?sector=...`              | query                                                  |                                                                                                                                   |
+| `scheduler.poll_news(client)`                        | `POST /admin/poll`                         | —                                                      | Manual trigger; instantiates a Slack `WebClient` server-side. Protect (see §6.3).                                                 |
+| `scheduler.send_daily_digest(client)`                | `POST /admin/digest`                       | —                                                      | Manual trigger. Protect.                                                                                                          |
+| `main.run_mock_demo()`                               | `POST /admin/demo`                         | —                                                      | Dry-run smoke test. Protect.                                                                                                      |
+
 
 Skeleton (FastAPI + uvicorn, exactly as documented in `deploy-fastapi.md:14`):
 
@@ -148,17 +152,19 @@ Start command (per `deploy-fastapi.md:14`): `uvicorn api:app --host 0.0.0.0 --po
 
 ### 4.2 JS (`mvp/src/server.js`, Express)
 
-| Function (source) | Method + Path | Body / Query | Notes |
-|---|---|---|---|
-| `finnhub.pollFinnhub()` | `POST /poll` | — | Triggers one Finnhub poll cycle. |
-| `classify.classifyNext()` | `POST /classify/next` | — | Classifies the oldest pending article. |
-| `classify.classifyAllPending()` | `POST /classify/all` | — | Drains the pending queue. Long-running — see §6.4. |
-| `dispatch.dispatchOne(article)` | `POST /dispatch/one` | `{article}` | |
-| `dispatch.dispatchAll()` | `POST /dispatch/all` | — | |
-| `tools.get_thesis({ticker})` | `GET /thesis/{ticker}` | path | Already structured as a tool — wrap by calling its handler. |
-| `tools.get_recent_classifications({ticker, limit})` | `GET /classifications/{ticker}?limit=N` | path + query | |
-| `tools.fetch_article_body({article_id})` | `GET /articles/{article_id}/body` | path | |
-| `tools.classify_article({article_id, label, rationale})` | `POST /articles/{article_id}/classify` | `{label, rationale}` | Writes DB row + markdown file. |
+
+| Function (source)                                        | Method + Path                           | Body / Query         | Notes                                                       |
+| -------------------------------------------------------- | --------------------------------------- | -------------------- | ----------------------------------------------------------- |
+| `finnhub.pollFinnhub()`                                  | `POST /poll`                            | —                    | Triggers one Finnhub poll cycle.                            |
+| `classify.classifyNext()`                                | `POST /classify/next`                   | —                    | Classifies the oldest pending article.                      |
+| `classify.classifyAllPending()`                          | `POST /classify/all`                    | —                    | Drains the pending queue. Long-running — see §6.4.          |
+| `dispatch.dispatchOne(article)`                          | `POST /dispatch/one`                    | `{article}`          |                                                             |
+| `dispatch.dispatchAll()`                                 | `POST /dispatch/all`                    | —                    |                                                             |
+| `tools.get_thesis({ticker})`                             | `GET /thesis/{ticker}`                  | path                 | Already structured as a tool — wrap by calling its handler. |
+| `tools.get_recent_classifications({ticker, limit})`      | `GET /classifications/{ticker}?limit=N` | path + query         |                                                             |
+| `tools.fetch_article_body({article_id})`                 | `GET /articles/{article_id}/body`       | path                 |                                                             |
+| `tools.classify_article({article_id, label, rationale})` | `POST /articles/{article_id}/classify`  | `{label, rationale}` | Writes DB row + markdown file.                              |
+
 
 Skeleton (Express, matches the start command convention in `deploy-node-express-app.md:14-22`):
 
@@ -228,7 +234,8 @@ Extended file (worker + two web services). Field syntax follows `blueprint-spec.
 
 ```yaml
 services:
-  # 1. Existing Slack-bot worker — unchanged.
+  # 1. Existing Slack-bot worker — Supabase env vars added so the worker
+  #    and the new web services read/write the same shared state (§6.2).
   - type: worker
     name: scif-slack-bot
     runtime: python
@@ -245,6 +252,12 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: FINNHUB_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
         sync: false
 
   # 2. NEW — Python HTTP surface (FastAPI).
@@ -264,6 +277,12 @@ services:
         sync: false
       - key: FINNHUB_API_KEY
         sync: false
+      - key: SUPABASE_URL
+        sync: false        # https://<project-ref>.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false        # server-side only; bypasses RLS
+      - key: SUPABASE_DB_URL
+        sync: false        # optional, Supavisor session pooler postgres://...:5432/postgres
       - key: API_AUTH_TOKEN
         sync: false        # see §6.3
 
@@ -282,6 +301,12 @@ services:
         sync: false
       - key: LLM_MODEL
         sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
       - key: API_AUTH_TOKEN
         sync: false
 ```
@@ -293,8 +318,9 @@ Notes on the new fields:
 - `healthCheckPath` is listed in `blueprint-spec.md:81` and is highly recommended for web services. `/docs` exists automatically on FastAPI; for Express, add a tiny `GET /` returning `200`.
 - `sync: false` causes Render to "prompt for a value in the Render Dashboard" instead of committing the secret (`blueprint-spec.md:49`). Same pattern the existing worker already uses.
 - Public access can be disabled per service with `renderSubdomainPolicy: disabled` (`blueprint-spec.md:42`) if the team wants endpoints reachable only via custom domains.
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_DB_URL` are duplicated across all three services above. They are good candidates for a Render **environment group** referenced via `fromGroup` (`blueprint-spec.md:59`) so the values live in one place. Treat the service-role key as a production secret — it bypasses Supabase RLS.
 
-To make `scif-api` reachable _only_ by other Render services (not the public internet), change `type: web` to `type: pserv` (private service). Per `private-services.md:1-12`, private services are "just like web services" but skip the `onrender.com` subdomain.
+To make `scif-api` reachable *only* by other Render services (not the public internet), change `type: web` to `type: pserv` (private service). Per `private-services.md:1-12`, private services are "just like web services" but skip the `onrender.com` subdomain.
 
 ---
 
@@ -306,25 +332,43 @@ Both new services need every secret the existing worker uses (Slack tokens, Finn
 
 If many services will share the same secret set, factor them into an environment group and reference with `fromGroup` (`blueprint-spec.md:59`).
 
-### 6.2 Ephemeral filesystem — affects `subscriptions.json`, `seen_articles.json`, `digest_queue.json`, and `data/` SQLite
+### 6.2 Shared state — Supabase Postgres (hard requirement)
 
-Render's default filesystem is ephemeral: "without a persistent disk, any changes you make to a service's local files are _lost_ every time the service redeploys or restarts" (`disks.md:1-7`).
+Render's default filesystem is ephemeral: "without a persistent disk, any changes you make to a service's local files are *lost* every time the service redeploys or restarts" (`disks.md:1-7`). Today the Python bot persists state via three JSON files (`subscriptions.py:22`, `scheduler.py:33-34`); the JS MVP persists state in a local SQLite DB (`mvp/src/db.js`). On the existing worker this already loses data on every deploy.
 
-Today the Python bot persists state via three JSON files (`subscriptions.py:22`, `scheduler.py:33-34`). The JS MVP persists state in a local SQLite DB (`mvp/src/db.js`). On the existing worker this already loses data on every deploy.
+Render-native options (persistent disk, Render Postgres, Render Key Value) are **not used** for this project. State lives in **Supabase Postgres**, which all three Render services (worker + two web services) connect to over the network. This is a clean fit:
 
-Options:
-1. **Persistent disk** — paid feature, attach to one service and mount at e.g. `/var/data`. "Persistent disks use the same high-performance SSDs as Render Postgres and Key Value instances" (`disks.md:18`). Important: a disk can only be attached to one service. If both the worker _and_ the new web service need to read/write the same `subscriptions.json`, the disk must live on whichever one writes it, and the other must reach it some other way — which it can't, because workers expose nothing.
-2. **Move state into Render Postgres or Render Key Value** — listed as managed datastores in `service-types.md:141-145`. Recommended for any state that more than one service touches. Subscriptions, seen-article IDs, and the digest queue are all natural Postgres rows.
-3. **Tolerate ephemerality** during the migration and treat the JSON files as cache only.
+- A Supabase project *is* a managed Postgres instance. The Render-side change is just env vars + a client library — no Render data product is provisioned.
+- Render's "disk can only attach to one service" limitation (`disks.md`) does not apply: Supabase is reached over the network, so the worker and both web services read/write the same tables.
+- The empty `supabase/migrations/` directory at the repo root is where schema migrations belong.
 
-Recommended: migrate `subscriptions.json` and `digest_queue.json` to Postgres before promoting the new web service to a source of truth. Until then, keep all writes on the worker and have the web service treat writes as best-effort.
+Connection options from Render → Supabase (`supabase_docs/guides/database/connecting-to-postgres/serverless-drivers.md`):
+
+
+| From                                                       | Recommended path                                                                                       | Why                                                                                                                                                                                                    |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Python (`scif-slack-bot/`) — worker + FastAPI              | `**supabase-py` SDK** using `SUPABASE_URL` + service-role key                                          | Server-side trusted code; SDK wraps PostgREST, no connection-pool tuning needed. Init pattern in `supabase_docs/reference/python/initializing.md`.                                                     |
+| JS (`mvp/`) — Express + CLI                                | `**@supabase/supabase-js`** using `SUPABASE_URL` + service-role key                                    | Same rationale; matches existing `"type": "module"` setup.                                                                                                                                             |
+| Either, when raw SQL is needed (migrations, complex joins) | **Supavisor session-mode pooler** via `DATABASE_URL` (`postgres://…pooler.supabase.com:5432/postgres`) | Render web services and workers are long-running persistent backends → session mode, not transaction mode. Pooler URL works on IPv4 and IPv6; the direct `db.<ref>.supabase.co:5432` URL is IPv6-only. |
+
+
+Use the **service-role key**, not the anon key, for these backends. They run server-side, bypass RLS, and never receive user JWTs. Keep RLS enabled on the tables anyway (defense in depth) — service-role traffic ignores it; any future browser-facing surface will hit it.
+
+Schema to add under `supabase/migrations/` before any web-service write path is enabled:
+
+- `subscriptions(user_id text, sector text, created_at timestamptz default now(), primary key (user_id, sector))` — replaces `subscriptions.json`.
+- `seen_articles(source_event_id text primary key, ticker text, seen_at timestamptz default now())` — replaces `seen_articles.json`.
+- `digest_queue(id bigserial primary key, payload jsonb not null, queued_at timestamptz default now(), sent_at timestamptz)` — replaces `digest_queue.json`.
+- The JS MVP's `companies` / `theses` / `articles` tables in `mvp/src/db.js` move into Supabase verbatim (drop SQLite `integer primary key autoincrement` → `bigserial`; `check (classification in (...))` → Postgres `text` + check constraint as-is).
+
+Migration order: write the SQL migrations first, run them against the Supabase project, *then* swap the Python JSON readers and `mvp/src/db.js` over to the Supabase client. Until both sides write to Supabase, treat the worker's local files as the source of truth and the web service as read-only.
 
 ### 6.3 Authentication
 
 None of the catalogued functions check identity today. Once exposed on a public `onrender.com` URL, they become callable by anyone on the internet. At minimum:
 
 - Require a shared secret header (e.g. `X-API-Token`) checked against `API_AUTH_TOKEN` in `envVars`. `generateValue: true` in `blueprint-spec.md:46` will have Render mint "a base64-encoded 256-bit value" automatically.
-- For endpoints that send Slack messages or trigger LLM spend (`/alerts/*`, `/digest/send`, `/classify`, `/admin/*`), this is mandatory — they cost real money per call.
+- For endpoints that send Slack messages or trigger LLM spend (`/alerts/`*, `/digest/send`, `/classify`, `/admin/*`), this is mandatory — they cost real money per call.
 - If endpoints are only ever consumed by other Render services, switch the new service to `type: pserv` (`private-services.md`) so the public internet cannot reach them at all.
 - Optionally use `ipAllowList` (`blueprint-spec.md:60-64`) to limit callers to known office/CI IPs (Scale + Enterprise plans only).
 
@@ -339,7 +383,7 @@ None of the catalogued functions check identity today. Once exposed on a public 
 
 The existing worker calls `start_scheduler(slack_client)` from `main.py:81`, which spawns a daemon thread (`scheduler.py:199-204`) that polls Finnhub every 15 minutes. Do **not** also start the scheduler inside `api.py` — that would double-poll. Keep `main.py` (worker) as the only place that owns the scheduler. The web service should be a read/write surface over the same code, not a second copy of the loop.
 
-If we want manual `/admin/poll` and `/admin/digest` endpoints to share state with the worker (seen-article IDs, digest queue), those state files must live on shared storage — which on Render means Postgres or Key Value (see §6.2). The web service cannot read the worker's local filesystem.
+If we want manual `/admin/poll` and `/admin/digest` endpoints to share state with the worker (seen-article IDs, digest queue), those state files must live on shared storage — which for this project is Supabase Postgres (see §6.2). The web service cannot read the worker's local filesystem.
 
 ### 6.6 Auto-deploys per subdirectory
 
@@ -348,6 +392,7 @@ The two new services build off `rootDir: scif-slack-bot` and `rootDir: mvp` resp
 ### 6.7 CORS
 
 If a future frontend at `index.html` / `src/` (Vite app) calls these endpoints from a browser, enable CORS:
+
 - FastAPI: `from fastapi.middleware.cors import CORSMiddleware`.
 - Express: `app.use(cors({ origin: ALLOWED_ORIGINS }))`.
 
@@ -357,28 +402,36 @@ Lock the allowlist to the static-site domain rather than `*`.
 
 ## 7. Migration order (suggested)
 
-1. Add `fastapi`, `uvicorn[standard]` to `scif-slack-bot/requirements.txt`. Add `express` to `mvp/package.json`.
-2. Create `scif-slack-bot/api.py` with a single route (`/classify`) and `mvp/src/server.js` with `/poll`. Verify locally on `:10000`.
-3. Update `render.yaml` to add the two `type: web` services (§5). Push.
-4. In the Render Dashboard, fill in the prompted `sync: false` secrets for the new services on first deploy.
-5. Add `API_AUTH_TOKEN` enforcement (§6.3) before adding any state-mutating routes.
-6. Migrate `subscriptions.json` and `digest_queue.json` to Postgres (§6.2) before the web service is allowed to write to them.
-7. Add remaining routes from the §4 tables, one feature at a time.
+1. Provision the Supabase project (if not already done). Capture `SUPABASE_URL`, the **service-role** key, and the Supavisor session-mode `DATABASE_URL`.
+2. Write the schema migrations described in §6.2 into `supabase/migrations/` and apply them to the Supabase project. Keep RLS enabled on all tables.
+3. Add `fastapi`, `uvicorn[standard]`, and `supabase` (the Python client) to `scif-slack-bot/requirements.txt`. Add `express` and `@supabase/supabase-js` to `mvp/package.json`.
+4. Port `subscriptions.py`, the `seen_articles` / `digest_queue` writers in `scheduler.py`, and `mvp/src/db.js` from JSON/SQLite to the Supabase client. Worker (and only the worker) writes first; verify locally against Supabase.
+5. Create `scif-slack-bot/api.py` with a single route (`/classify`) and `mvp/src/server.js` with `/poll`. Verify locally on `:10000`, reading shared state from Supabase.
+6. Update `render.yaml` to add the two `type: web` services and the Supabase env vars on all three services (§5). Push.
+7. In the Render Dashboard, fill in the prompted `sync: false` secrets — including `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL` — for each service on first deploy. Prefer an env group.
+8. Add `API_AUTH_TOKEN` enforcement (§6.3) before adding any state-mutating routes.
+9. Add remaining routes from the §4 tables, one feature at a time.
 
 ---
 
 ## 8. Reference index
 
-| Topic | Source |
-|---|---|
-| Service types overview, decision flowchart | `render_docs/service-types.md` |
-| Web service port binding (`0.0.0.0`, default `10000`) | `render_docs/web-services.md` |
-| FastAPI quickstart and start command | `render_docs/deploy-fastapi.md` |
-| Flask quickstart (alternative) | `render_docs/deploy-flask.md` |
-| Express quickstart | `render_docs/deploy-node-express-app.md` |
-| Fastify quickstart and `0.0.0.0` gotcha | `render_docs/deploy-node-fastify-app.md` |
-| Private services (internal-only HTTP) | `render_docs/private-services.md` |
-| `render.yaml` field reference (envVars, sync, fromGroup, healthCheckPath, ipAllowList, renderSubdomainPolicy) | `render_docs/blueprint-spec.md` |
-| Multi-service architecture pattern | `render_docs/multi-service-architecture.md` |
-| Monorepo support (`rootDir`, build filters) | `render_docs/monorepo-support.md` |
-| Persistent disks vs. ephemeral filesystem | `render_docs/disks.md` |
+
+| Topic                                                                                                         | Source                                                                       |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Service types overview, decision flowchart                                                                    | `render_docs/service-types.md`                                               |
+| Web service port binding (`0.0.0.0`, default `10000`)                                                         | `render_docs/web-services.md`                                                |
+| FastAPI quickstart and start command                                                                          | `render_docs/deploy-fastapi.md`                                              |
+| Flask quickstart (alternative)                                                                                | `render_docs/deploy-flask.md`                                                |
+| Express quickstart                                                                                            | `render_docs/deploy-node-express-app.md`                                     |
+| Fastify quickstart and `0.0.0.0` gotcha                                                                       | `render_docs/deploy-node-fastify-app.md`                                     |
+| Private services (internal-only HTTP)                                                                         | `render_docs/private-services.md`                                            |
+| `render.yaml` field reference (envVars, sync, fromGroup, healthCheckPath, ipAllowList, renderSubdomainPolicy) | `render_docs/blueprint-spec.md`                                              |
+| Multi-service architecture pattern                                                                            | `render_docs/multi-service-architecture.md`                                  |
+| Monorepo support (`rootDir`, build filters)                                                                   | `render_docs/monorepo-support.md`                                            |
+| Persistent disks vs. ephemeral filesystem                                                                     | `render_docs/disks.md`                                                       |
+| Supabase Postgres connection methods (direct, Supavisor session/transaction)                                  | `supabase_docs/guides/database/connecting-to-postgres/serverless-drivers.md` |
+| `supabase-py` client initialization                                                                           | `supabase_docs/reference/python/initializing.md`                             |
+| `@supabase/supabase-js` reference                                                                             | `supabase_docs/reference/javascript/`                                        |
+
+

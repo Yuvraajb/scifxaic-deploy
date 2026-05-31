@@ -1,4 +1,10 @@
-import { db } from './db.js';
+// Seed the Supabase companies + theses tables with the starting portfolio.
+// Idempotent: companies upsert on ticker; a thesis is inserted only when the
+// company has no active thesis yet. Run once at deploy time.
+
+import { config as loadEnv } from 'dotenv';
+loadEnv({ override: true });
+import { upsertCompany, getActiveThesisFor, insertThesis } from './repo.js';
 
 const portfolio = [
   {
@@ -69,24 +75,22 @@ const portfolio = [
   },
 ];
 
-const insertCompany = db.prepare(
-  'insert or ignore into companies (ticker, name, sector) values (?, ?, ?)'
-);
-const insertThesis = db.prepare(
-  'insert into theses (company_id, structured_json) values (?, ?)'
-);
-const findCompany = db.prepare('select id from companies where ticker = ?');
-
-for (const p of portfolio) {
-  insertCompany.run(p.ticker, p.name, p.sector);
-  const row = findCompany.get(p.ticker);
-  const existing = db
-    .prepare('select id from theses where company_id = ? and active = 1')
-    .get(row.id);
-  if (!existing) {
-    insertThesis.run(row.id, JSON.stringify(p.thesis));
+async function seed() {
+  for (const p of portfolio) {
+    const company = await upsertCompany({ ticker: p.ticker, name: p.name, sector: p.sector });
+    const existing = await getActiveThesisFor(company.id);
+    if (existing) {
+      console.log(`thesis already exists for ${p.ticker}, skipping`);
+      continue;
+    }
+    await insertThesis(company.id, p.thesis);
     console.log(`seeded thesis for ${p.ticker}`);
-  } else {
-    console.log(`thesis already exists for ${p.ticker}, skipping`);
   }
 }
+
+seed()
+  .then(() => process.exit(0))
+  .catch((e) => {
+    console.error('seed failed:', e.message);
+    process.exit(1);
+  });

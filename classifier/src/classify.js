@@ -15,7 +15,12 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ override: true });
 import { createAgent } from 'langchain';
 import { ChatOpenAI } from '@langchain/openai';
-import { db } from './db.js';
+import {
+  claimNextPending,
+  getArticleClassification,
+  markClassification,
+  loadFullArticle,
+} from './repo.js';
 import { tools } from './tools.js';
 import { dispatchOne } from './dispatch.js';
 
@@ -49,30 +54,6 @@ const classificationAgent = createAgent({
   systemPrompt: SYSTEM_PROMPT,
 });
 
-const claimRow = db.prepare(`
-  select a.*, c.ticker, c.name
-  from articles a
-  join companies c on c.id = a.company_id
-  where a.classification is null
-  order by a.published_at
-  limit 1
-`);
-
-const checkClassifiedSql = db.prepare(
-  'select classification, rationale from articles where id = ?'
-);
-const markFailureSql = db.prepare(`
-  update articles
-  set classification = ?, rationale = ?, classified_at = current_timestamp
-  where id = ?
-`);
-const loadFullArticleSql = db.prepare(`
-  select a.*, c.ticker
-  from articles a
-  join companies c on c.id = a.company_id
-  where a.id = ?
-`);
-
 function buildUserMessage(row) {
   return `Article to classify:
 
@@ -87,7 +68,7 @@ Start by calling get_thesis for this ticker. Then decide and call classify_artic
 }
 
 export async function classifyNext() {
-  const row = claimRow.get();
+  const row = await claimNextPending();
   if (!row) return null;
 
   try {
@@ -107,19 +88,19 @@ export async function classifyNext() {
     }
     // Non-transient: record IGNORE so the worklist progresses.
     const rationale = `classification failed: ${e.message}`;
-    markFailureSql.run('IGNORE', rationale, row.id);
-    dispatchOne({ ...loadFullArticleSql.get(row.id) });
+    await markClassification(row.id, 'IGNORE', rationale);
+    await dispatchOne({ ...(await loadFullArticle(row.id)) });
     return { ...row, label: 'IGNORE', rationale };
   }
 
   // The agent terminates by calling classify_article. Verify that happened.
-  const post = checkClassifiedSql.get(row.id);
+  const post = await getArticleClassification(row.id);
   if (!post || !post.classification) {
     const rationale =
       'Agent terminated without calling classify_article; recording IGNORE so the worklist progresses.';
     console.warn(`article ${row.id}: ${rationale}`);
-    markFailureSql.run('IGNORE', rationale, row.id);
-    dispatchOne({ ...loadFullArticleSql.get(row.id) });
+    await markClassification(row.id, 'IGNORE', rationale);
+    await dispatchOne({ ...(await loadFullArticle(row.id)) });
     return { ...row, label: 'IGNORE', rationale };
   }
 

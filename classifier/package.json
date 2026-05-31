@@ -1,7 +1,7 @@
 {
-  "name": "mvp",
+  "name": "scif-classifier",
   "version": "1.0.0",
-  "description": "SCIF Thesis Tracker — local MVP",
+  "description": "SCIF Thesis Tracker — Finnhub poller + LangChain classification agent + Slack notifier",
   "type": "module",
   "main": "src/run.js",
   "scripts": {
@@ -19,7 +19,6 @@
     "@supabase/supabase-js": "^2.103.0",
     "@langchain/openai": "^1.4.7",
     "axios": "^1.16.1",
-    "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "langchain": "^1.4.2",
     "pdf-parse": "^2.4.5",

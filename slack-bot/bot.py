@@ -25,11 +25,10 @@ from subscriptions import (
     subscribe_all,
     unsubscribe,
     unsubscribe_all,
+    set_subscriptions,
     get_subscriptions,
     format_subscriptions_list,
 )
-from alerts import send_instant_alert, send_dm_alert
-from digest import send_monthly_digest
 
 load_dotenv()
 
@@ -64,15 +63,9 @@ def create_app() -> App:
 def _build_onboarding_blocks() -> list[dict]:
     """Build the sector-selection onboarding message using Block Kit checkboxes."""
     sector_emojis = {
-        "EV / Clean Energy":    "🔵",
-        "Biotech":              "🟢",
-        "Enterprise Tech / AI": "🟣",
-        "Consumer":             "🟡",
-        "Financials":           "🟠",
-        "Healthcare":           "⚪",
-        "Energy":               "🔴",
-        "Industrials":          "🟤",
-        "Real Estate":          "🏠",
+        "TMT":        "🟣",
+        "Healthcare": "🟢",
+        "Consumer":   "🟡",
     }
     options = [
         {
@@ -201,11 +194,8 @@ def _register_handlers(app: App) -> None:
             )
             return
 
-        # Persist subscriptions
-        from subscriptions import _load, _save
-        data = _load()
-        data[user_id] = chosen_sectors
-        _save(data)
+        # Persist subscriptions (replaces the user's full set in Supabase)
+        set_subscriptions(user_id, chosen_sectors)
 
         bullet_list = "\n".join(f"• {s}" for s in chosen_sectors)
         client.chat_update(
@@ -273,10 +263,10 @@ def _register_handlers(app: App) -> None:
         if not sector_arg:
             respond(
                 "Please specify a sector. Examples:\n"
-                "• `/subscribe tech`\n"
-                "• `/subscribe biotech`\n"
+                "• `/subscribe tmt`\n"
+                "• `/subscribe healthcare`\n"
                 "• `/subscribe all`\n\n"
-                f"Available sectors: {', '.join(['EV / Clean Energy', 'Biotech', 'Enterprise Tech / AI', 'Consumer', 'Financials', 'Healthcare', 'Energy', 'Industrials', 'Real Estate'])}"
+                f"Available sectors: {', '.join(KNOWN_SECTORS)}"
             )
             return
 
@@ -336,10 +326,9 @@ def _register_handlers(app: App) -> None:
             "• `/subscribe all` — subscribe to everything\n"
             "• `/unsubscribe <sector>` — unsubscribe from a sector\n"
             "• `/subscriptions` — see your current subscriptions\n\n"
-            "*Available sectors:* EV / Clean Energy, Biotech, Enterprise Tech / AI, "
-            "Consumer, Financials, Healthcare, Energy, Industrials, Real Estate\n\n"
-            "_Instant needle-mover alerts and monthly digests are posted "
-            "automatically when events are detected._"
+            f"*Available sectors:* {', '.join(KNOWN_SECTORS)}\n\n"
+            "_HIGH_ALERT notifications are posted automatically when the "
+            "classification agent flags thesis-moving events._"
         )
 
     # ------------------------------------------------------------------
