@@ -199,7 +199,9 @@ function formatSubscriptionCategories(values) {
 }
 
 async function handleSubscribeCommand({ command, ack, client }) {
+  console.log('[SUBSCRIBE] received, acking...');
   await ack();
+  console.log('[SUBSCRIBE] acked, fetching sectors...');
 
   let savedSectors = [];
   try {
@@ -210,6 +212,7 @@ async function handleSubscribeCommand({ command, ack, client }) {
   } catch (err) {
     console.error('[SUBSCRIBE LOAD ERROR]', err.message);
   }
+  console.log('[SUBSCRIBE] sectors fetched, opening modal...');
 
   const initialOptions = subscriptionCategoryOptions.filter(option =>
     savedSectors.includes(option.value)
@@ -228,7 +231,8 @@ async function handleSubscribeCommand({ command, ack, client }) {
     categoryElement.initial_options = initialOptions;
   }
 
-  await client.views.open({
+  try {
+    await client.views.open({
     trigger_id: command.trigger_id,
     view: {
       type: 'modal',
@@ -260,6 +264,10 @@ async function handleSubscribeCommand({ command, ack, client }) {
       ],
     },
   });
+    console.log('[SUBSCRIBE] modal opened successfully');
+  } catch (err) {
+    console.error('[SUBSCRIBE MODAL ERROR]', err.message, err.data);
+  }
 }
 
 // Slash command: /deck [@user1 @user2 ...]
@@ -550,6 +558,10 @@ app.view('subscription_preferences_submission', async ({ ack, body, view, client
 // App mention: @YourBot
 app.event('app_mention', async ({ event, say }) => {
   await say(`Hey <@${event.user}>! You mentioned me? 👀`);
+});
+
+app.error(async (error) => {
+  console.error('[APP ERROR]', error.message, error.original?.message);
 });
 
 (async () => {
