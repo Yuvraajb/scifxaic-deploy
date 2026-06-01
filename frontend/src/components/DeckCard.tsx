@@ -2,6 +2,17 @@ import { useState } from 'react';
 import type { Deck } from '../types';
 import ThesisModal from './ThesisModal';
 
+export async function downloadFile(url: string, filename: string) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(blobUrl);
+}
+
 interface Props {
   deck: Deck;
 }
@@ -62,18 +73,15 @@ export default function DeckCard({ deck }: Props) {
             Read thesis
           </button>
           {deck.file_url && (
-            <a
-              href={deck.file_url}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => downloadFile(deck.file_url!, `${deck.ticker}-deck.${deck.file_url!.split('.').pop()}`)}
               className="flex items-center gap-1 py-1.5 px-3 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download
-            </a>
+            </button>
           )}
         </div>
       </div>

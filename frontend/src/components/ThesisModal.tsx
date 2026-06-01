@@ -1,4 +1,5 @@
 import type { Deck } from '../types';
+import { downloadFile } from './DeckCard';
 
 interface Props {
   deck: Deck;
@@ -62,18 +63,15 @@ export default function ThesisModal({ deck, onClose }: Props) {
         {/* Footer */}
         <div className="px-6 pb-5 pt-3 border-t border-gray-100 flex items-center justify-between">
           {deck.file_url ? (
-            <a
-              href={deck.file_url}
-              download
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              onClick={() => downloadFile(deck.file_url!, `${deck.ticker}-deck.${deck.file_url!.split('.').pop()}`)}
               className="flex items-center gap-2 px-4 py-2 bg-crimson-800 hover:bg-crimson-900 text-white text-sm font-semibold rounded-lg transition-colors"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download Deck
-            </a>
+            </button>
           ) : (
             <span className="text-xs text-gray-400 italic">File not available for download</span>
           )}
