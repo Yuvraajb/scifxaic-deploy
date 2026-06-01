@@ -15,6 +15,7 @@ export async function downloadFile(url: string, filename: string) {
 
 interface Props {
   deck: Deck;
+  onDragStart?: (e: React.DragEvent) => void;
 }
 
 function initials(name: string | null) {
@@ -26,13 +27,17 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function DeckCard({ deck }: Props) {
+export default function DeckCard({ deck, onDragStart }: Props) {
   const [showThesis, setShowThesis] = useState(false);
   const creator = deck.deck_creator || 'Unknown';
 
   return (
     <>
-      <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow">
+      <div
+        draggable
+        onDragStart={onDragStart}
+        className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-grab active:cursor-grabbing active:opacity-60 active:scale-95 transition-all"
+      >
         <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="text-gray-300 cursor-grab">

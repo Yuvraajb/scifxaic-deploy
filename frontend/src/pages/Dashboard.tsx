@@ -1,16 +1,25 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/useAuthStore';
 import DeckCard from '../components/DeckCard';
 import UploadModal from '../components/UploadModal';
+import SectorChangeModal from '../components/SectorChangeModal';
 import type { Deck } from '../types';
+
+interface PendingMove {
+  deck: Deck;
+  toSector: string;
+}
 
 export default function Dashboard() {
   const { profile, signOut } = useAuthStore();
   const navigate = useNavigate();
   const [decks, setDecks] = useState<Deck[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+  const [dragOverSector, setDragOverSector] = useState<string | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
+  const draggingDeck = useRef<Deck | null>(null);
 
   const sectors = profile?.role === 'god'
     ? ['Consumer', 'Healthcare', 'TMT']
@@ -27,6 +36,44 @@ export default function Dashboard() {
   }, [profile, sectors.join(',')]);
 
   useEffect(() => { fetchDecks(); }, [fetchDecks]);
+
+  function handleDragStart(deck: Deck) {
+    draggingDeck.current = deck;
+  }
+
+  function handleDragOver(e: React.DragEvent, sector: string) {
+    e.preventDefault();
+    if (draggingDeck.current?.sector !== sector) setDragOverSector(sector);
+  }
+
+  function handleDrop(e: React.DragEvent, toSector: string) {
+    e.preventDefault();
+    setDragOverSector(null);
+    const deck = draggingDeck.current;
+    if (!deck || deck.sector === toSector) return;
+    setPendingMove({ deck, toSector });
+  }
+
+  async function confirmMove() {
+    if (!pendingMove) return;
+    const { deck, toSector } = pendingMove;
+    // Optimistic update
+    setDecks(prev => prev.map(d => d.id === deck.id ? { ...d, sector: toSector } : d));
+    setPendingMove(null);
+    const { error } = await supabase
+      .from('investment_tracker')
+      .update({ sector: toSector })
+      .eq('id', deck.id);
+    if (error) {
+      // Rollback on failure
+      setDecks(prev => prev.map(d => d.id === deck.id ? { ...d, sector: deck.sector } : d));
+    }
+  }
+
+  function cancelMove() {
+    setPendingMove(null);
+    draggingDeck.current = null;
+  }
 
   async function handleSignOut() {
     await signOut();
@@ -81,8 +128,19 @@ export default function Dashboard() {
           <div className="mt-6 grid gap-6" style={{ gridTemplateColumns: `repeat(${sectors.length}, minmax(0, 1fr))` }}>
             {sectors.map((sector) => {
               const sectorDecks = decks.filter((d) => d.sector === sector);
+              const isOver = dragOverSector === sector;
               return (
-                <div key={sector} className="bg-white border border-gray-200 rounded-2xl p-5">
+                <div
+                  key={sector}
+                  onDragOver={(e) => handleDragOver(e, sector)}
+                  onDragLeave={() => setDragOverSector(null)}
+                  onDrop={(e) => handleDrop(e, sector)}
+                  className={`rounded-2xl p-5 border-2 transition-all duration-150 ${
+                    isOver
+                      ? 'border-crimson-400 bg-crimson-50 scale-[1.01] shadow-lg'
+                      : 'border-gray-200 bg-white'
+                  }`}
+                >
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="font-semibold text-gray-900">{sector}</h2>
                     <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
@@ -92,16 +150,23 @@ export default function Dashboard() {
 
                   <div className="space-y-3">
                     {sectorDecks.map((deck) => (
-                      <DeckCard key={deck.id} deck={deck} />
+                      <DeckCard
+                        key={deck.id}
+                        deck={deck}
+                        onDragStart={() => handleDragStart(deck)}
+                      />
                     ))}
                   </div>
 
-                  {/* Add new placeholder */}
                   <button
                     onClick={() => setShowUpload(true)}
-                    className="mt-3 w-full border-2 border-dashed border-gray-200 rounded-xl py-4 text-sm text-gray-400 hover:border-crimson-300 hover:text-crimson-500 transition-colors"
+                    className={`mt-3 w-full border-2 border-dashed rounded-xl py-4 text-sm transition-colors ${
+                      isOver
+                        ? 'border-crimson-400 text-crimson-500 bg-crimson-50'
+                        : 'border-gray-200 text-gray-400 hover:border-crimson-300 hover:text-crimson-500'
+                    }`}
                   >
-                    + Add deck
+                    {isOver ? 'Drop here' : '+ Add deck'}
                   </button>
                 </div>
               );
@@ -114,6 +179,16 @@ export default function Dashboard() {
         <UploadModal
           onClose={() => setShowUpload(false)}
           onSuccess={fetchDecks}
+        />
+      )}
+
+      {pendingMove && (
+        <SectorChangeModal
+          deckTicker={pendingMove.deck.ticker}
+          fromSector={pendingMove.deck.sector || 'Unknown'}
+          toSector={pendingMove.toSector}
+          onConfirm={confirmMove}
+          onCancel={cancelMove}
         />
       )}
     </div>
