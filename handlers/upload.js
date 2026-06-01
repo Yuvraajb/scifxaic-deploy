@@ -89,4 +89,11 @@ async function processFile({ downloadUrl, fileType, slackToken }) {
   return extractTickerAndThesis(cleanedText);
 }
 
-module.exports = { processFile };
+// Buffer-based version for direct API uploads (no Slack download needed).
+async function processFileBuffer({ buffer, fileType }) {
+  const rawText = await extractText(buffer, fileType);
+  const cleanedText = cleanText(rawText);
+  return extractTickerAndThesis(cleanedText);
+}
+
+module.exports = { processFile, processFileBuffer };

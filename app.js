@@ -1,6 +1,9 @@
 require('dotenv').config();
 const crypto = require('crypto');
 const { App, ExpressReceiver } = require('@slack/bolt');
+const multer = require('multer');
+const cors = require('cors');
+const { createClient } = require('@supabase/supabase-js');
 
 const requiredEnv = [
   'SLACK_SIGNING_SECRET',
@@ -19,6 +22,12 @@ const { saveInvestment } = require('./handlers/investments');
 const { getSectorsForSlackUser, upsertSubscriptionSectors } = require('./handlers/subscriptions');
 const { processFile } = require('./handlers/upload');
 
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { autoRefreshToken: false, persistSession: false } }
+);
+
 const receiver = new ExpressReceiver({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
 });
@@ -26,6 +35,126 @@ const receiver = new ExpressReceiver({
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   receiver,
+});
+
+// ── API middleware ──────────────────────────────────────────────────────────
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+
+const allowedOrigins = (process.env.FRONTEND_URL || '').split(',').map(s => s.trim()).filter(Boolean);
+receiver.router.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
+receiver.router.use(require('express').json());
+
+async function requireAuth(req, res, next) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+  if (error || !user) return res.status(401).json({ error: 'Unauthorized' });
+  const { data: profile } = await supabaseAdmin.from('profiles').select('*').eq('id', user.id).single();
+  if (!profile) return res.status(403).json({ error: 'Access denied' });
+  req.user = user;
+  req.profile = profile;
+  next();
+}
+
+function requireGod(req, res, next) {
+  if (req.profile?.role !== 'god') return res.status(403).json({ error: 'Forbidden' });
+  next();
+}
+
+// ── POST /api/upload ────────────────────────────────────────────────────────
+receiver.router.post('/api/upload', requireAuth, upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'No file provided' });
+
+    const ext = file.originalname.split('.').pop()?.toLowerCase();
+    if (!['pdf', 'pptx'].includes(ext)) return res.status(400).json({ error: 'Only PDF and PPTX supported' });
+
+    const { processFileBuffer } = require('./handlers/upload');
+    const { ticker: extractedTicker, thesis } = await processFileBuffer({
+      buffer: file.buffer,
+      fileType: ext,
+    });
+
+    const ticker = req.body.ticker || extractedTicker;
+    const companyName = req.body.companyName || ticker;
+    const sector = req.body.sector || null;
+
+    const { error } = await supabaseAdmin.from('investment_tracker').insert({
+      ticker,
+      company_name: companyName,
+      sector,
+      thesis,
+      deck_creator: req.profile.name || req.user.email,
+      slack_ids: [],
+    });
+
+    if (error) throw new Error(error.message);
+    res.json({ ok: true, ticker, thesis });
+  } catch (err) {
+    console.error('[API UPLOAD ERROR]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /api/invite ────────────────────────────────────────────────────────
+receiver.router.post('/api/invite', requireAuth, requireGod, async (req, res) => {
+  try {
+    const { email, name, sectors, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+
+    const { data, error } = await supabaseAdmin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+    if (error) throw new Error(error.message);
+
+    await supabaseAdmin.from('profiles').insert({
+      id: data.user.id,
+      email,
+      name: name || null,
+      role: 'member',
+      subscribed_sectors: sectors || [],
+    });
+
+    res.json({ ok: true, id: data.user.id });
+  } catch (err) {
+    console.error('[API INVITE ERROR]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /api/users ──────────────────────────────────────────────────────────
+receiver.router.get('/api/users', requireAuth, requireGod, async (req, res) => {
+  const { data, error } = await supabaseAdmin.from('profiles').select('*').order('created_at');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ── DELETE /api/users/:id ───────────────────────────────────────────────────
+receiver.router.delete('/api/users/:id', requireAuth, requireGod, async (req, res) => {
+  try {
+    await supabaseAdmin.from('profiles').delete().eq('id', req.params.id);
+    await supabaseAdmin.auth.admin.deleteUser(req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /api/users/:id/sectors ──────────────────────────────────────────────
+receiver.router.put('/api/users/:id/sectors', requireAuth, requireGod, async (req, res) => {
+  const { sectors } = req.body;
+  const { error } = await supabaseAdmin.from('profiles').update({ subscribed_sectors: sectors }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 // Health check endpoint for Render deploy readiness.
