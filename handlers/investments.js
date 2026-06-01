@@ -7,9 +7,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-function buildInvestmentRow({ ticker, thesis, slackIds, attribution }) {
+function buildInvestmentRow({ ticker, companyName, sector, thesis, slackIds, attribution }) {
   return {
     ticker,
+    company_name: companyName || ticker,
+    sector: sector || null,
     slack_ids: slackIds,
     thesis,
     deck_creator: attribution.deckCreator,
@@ -24,10 +26,7 @@ async function saveInvestment(investment) {
 
   if (error) throw new Error(`Supabase insert failed: ${error.message}`);
 
-  return {
-    ticker: row.ticker,
-    thesis: row.thesis,
-  };
+  return { ticker: row.ticker, thesis: row.thesis };
 }
 
 module.exports = {

@@ -178,6 +178,15 @@ app.command('/hello', async ({ command, ack, respond }) => {
 const pendingUploads = new Map();
 const pendingAttributions = new Map();
 const processedDecks = new Map();
+
+async function resolveDisplayName(slackUserId) {
+  const { data } = await supabaseAdmin
+    .from('profiles')
+    .select('name')
+    .eq('slack_user_id', slackUserId)
+    .single();
+  return data?.name || `<@${slackUserId}>`;
+}
 const supportedDeckTypes = new Set(['pdf', 'pptx']);
 const subscriptionCategoryOptions = [
   {
@@ -280,6 +289,8 @@ async function saveDeckAttribution({ deckId, attribution, client, fallbackChanne
 
   await saveInvestment({
     ticker: deck.ticker,
+    companyName: deck.companyName || deck.ticker,
+    sector: deck.sector || null,
     thesis: deck.thesis,
     slackIds: deck.slackIds,
     attribution,
@@ -478,11 +489,14 @@ app.event('message', async ({ event: message, client, say }) => {
       });
       console.log(`[PROCESS] done ticker=${ticker}`);
 
+      const uploaderName = await resolveDisplayName(message.user);
       const mentions = pending.slackIds.map(id => `<@${id}>`).join(', ');
       const deckId = rememberProcessedDeck({
         ticker,
+        companyName: ticker,
         thesis,
         slackIds: pending.slackIds,
+        uploaderName,
         channel,
         threadTs,
         user: message.user,
@@ -604,6 +618,20 @@ app.action('open_deck_attribution_modal', async ({ ack, body, action, client }) 
             },
           },
         },
+        {
+          type: 'input',
+          block_id: 'sector',
+          label: { type: 'plain_text', text: 'Sector' },
+          element: {
+            type: 'static_select',
+            action_id: 'value',
+            placeholder: { type: 'plain_text', text: 'Select sector' },
+            options: subscriptionCategoryOptions.map(o => ({
+              text: o.text,
+              value: o.value,
+            })),
+          },
+        },
       ],
     },
   });
@@ -617,14 +645,22 @@ app.view('deck_attribution_submission', async ({ ack, body, view, client }) => {
   if (!deck) {
     await client.chat.postMessage({
       channel: body.user.id,
-      text: 'I could not find the processed deck details anymore. Please run /deck and upload the deck again.',
+      text: 'I could not find the processed deck details anymore. Please run /upload and upload the deck again.',
     });
     return;
   }
 
   const values = view.state.values;
+  const rawSector = values.sector?.value?.selected_option?.value || null;
+  const sector = rawSector
+    ? rawSector.charAt(0).toUpperCase() + rawSector.slice(1)
+    : null;
+
+  // Update stored deck with sector so saveDeckAttribution picks it up
+  if (deck && sector) deck.sector = sector;
+
   const attribution = {
-    deckCreator: normalizeMentionsOrText(values.deck_creator.value.value),
+    deckCreator: normalizeMentionsOrText(values.deck_creator.value.value) || deck.uploaderName,
     investmentMaker: normalizeMentionsOrText(values.investment_maker.value.value),
     thesisContributors: normalizeMentionsOrText(values.thesis_contributors.value.value),
   };
