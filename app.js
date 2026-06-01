@@ -106,7 +106,7 @@ receiver.router.post('/api/upload', requireAuth, upload.single('file'), async (r
 // ── POST /api/invite ────────────────────────────────────────────────────────
 receiver.router.post('/api/invite', requireAuth, requireGod, async (req, res) => {
   try {
-    const { email, name, sectors, password } = req.body;
+    const { email, name, slackUserId, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'email and password required' });
 
     const { data, error } = await supabaseAdmin.auth.admin.createUser({
@@ -121,7 +121,8 @@ receiver.router.post('/api/invite', requireAuth, requireGod, async (req, res) =>
       email,
       name: name || null,
       role: 'member',
-      subscribed_sectors: sectors || [],
+      slack_user_id: slackUserId || null,
+      subscribed_sectors: [],
     });
 
     res.json({ ok: true, id: data.user.id });

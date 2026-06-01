@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/useAuthStore';
-import { listUsers, inviteUser, deleteUser, updateUserSectors } from '../lib/api';
-import { SECTORS } from '../types';
+import { listUsers, inviteUser, deleteUser } from '../lib/api';
 
 interface User {
   id: string;
@@ -23,7 +22,7 @@ export default function Settings() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
-  const [inviteSectors, setInviteSectors] = useState<string[]>([]);
+  const [inviteSlackId, setInviteSlackId] = useState('');
   const [inviting, setInviting] = useState(false);
   const [inviteError, setInviteError] = useState('');
   const [inviteSuccess, setInviteSuccess] = useState('');
@@ -49,9 +48,9 @@ export default function Settings() {
     setInviteSuccess('');
     setInviting(true);
     try {
-      await inviteUser(inviteEmail, inviteName, inviteSectors, invitePassword);
+      await inviteUser(inviteEmail, inviteName, inviteSlackId, invitePassword);
       setInviteSuccess(`${inviteEmail} has been added.`);
-      setInviteEmail(''); setInviteName(''); setInvitePassword(''); setInviteSectors([]);
+      setInviteEmail(''); setInviteName(''); setInvitePassword(''); setInviteSlackId('');
       loadUsers();
     } catch (err) {
       setInviteError(err instanceof Error ? err.message : 'Failed to invite');
@@ -66,21 +65,7 @@ export default function Settings() {
     loadUsers();
   }
 
-  async function handleSectorToggle(userId: string, sector: string, current: string[]) {
-    const next = current.includes(sector)
-      ? current.filter((s) => s !== sector)
-      : [...current, sector];
-    await updateUserSectors(userId, next);
-    loadUsers();
-  }
-
-  function toggleInviteSector(s: string) {
-    setInviteSectors((prev) =>
-      prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s]
-    );
-  }
-
-  return (
+    return (
     <div className="min-h-screen bg-gray-50">
       <nav className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -140,23 +125,16 @@ export default function Settings() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Sectors</label>
-              <div className="flex gap-2">
-                {SECTORS.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => toggleInviteSector(s)}
-                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-                      inviteSectors.includes(s)
-                        ? 'bg-crimson-800 text-white border-crimson-800'
-                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Slack User ID <span className="text-gray-400 font-normal">(optional — for sector sync)</span>
+              </label>
+              <input
+                value={inviteSlackId}
+                onChange={(e) => setInviteSlackId(e.target.value)}
+                placeholder="e.g., U0AS71DL9LK"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-crimson-300"
+              />
+              <p className="text-xs text-gray-400 mt-1">Member sets their own sectors via /subscribe in Slack.</p>
             </div>
 
             {inviteError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{inviteError}</p>}
@@ -195,22 +173,15 @@ export default function Settings() {
                   </div>
 
                   <div className="flex items-center gap-3">
-                    {u.role !== 'god' && (
-                      <div className="flex gap-1.5">
-                        {SECTORS.map((s) => (
-                          <button
-                            key={s}
-                            onClick={() => handleSectorToggle(u.id, s, u.subscribed_sectors)}
-                            className={`px-2 py-1 rounded text-xs font-medium border transition-colors ${
-                              u.subscribed_sectors?.includes(s)
-                                ? 'bg-crimson-800 text-white border-crimson-800'
-                                : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'
-                            }`}
-                          >
-                            {s}
-                          </button>
+                    {u.role !== 'god' && u.subscribed_sectors?.length > 0 && (
+                      <div className="flex gap-1 flex-wrap">
+                        {u.subscribed_sectors.map((s) => (
+                          <span key={s} className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">{s}</span>
                         ))}
                       </div>
+                    )}
+                    {u.role !== 'god' && !(u.subscribed_sectors?.length > 0) && (
+                      <span className="text-xs text-gray-400 italic">No sectors — set via /subscribe in Slack</span>
                     )}
                     {u.role !== 'god' && (
                       <button

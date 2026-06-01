@@ -39,6 +39,13 @@ async function upsertSubscriptionSectors(slackUserId, sectors) {
   );
 
   if (error) throw new Error(`Supabase upsert failed: ${error.message}`);
+
+  // Sync to frontend profiles table so dashboard reflects Slack subscriptions.
+  const capitalized = (sectors ?? []).map(s => s.charAt(0).toUpperCase() + s.slice(1));
+  await supabase
+    .from('profiles')
+    .update({ subscribed_sectors: capitalized })
+    .eq('slack_user_id', slackUserId);
 }
 
 module.exports = {

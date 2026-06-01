@@ -22,12 +22,12 @@ export async function uploadDeck(formData: FormData) {
   return res.json();
 }
 
-export async function inviteUser(email: string, name: string, sectors: string[], password: string) {
+export async function inviteUser(email: string, name: string, slackUserId: string, password: string) {
   const headers = await authHeaders();
   const res = await fetch(`${BASE}/api/invite`, {
     method: 'POST',
     headers: { ...headers, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, sectors, password }),
+    body: JSON.stringify({ email, name, slackUserId, password }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Invite failed' }));
