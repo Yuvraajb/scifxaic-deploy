@@ -3,7 +3,7 @@ const path = require('path');
 const os = require('os');
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
-const { parseOfficeAsync } = require('officeparser');
+const { parseOffice } = require('officeparser');
 const GroqSDK = require('groq-sdk');
 
 const Groq = GroqSDK.default || GroqSDK;
@@ -30,7 +30,7 @@ async function extractPptx(buffer) {
   const tmpPath = path.join(os.tmpdir(), `upload_${Date.now()}.pptx`);
   try {
     fs.writeFileSync(tmpPath, buffer);
-    return await parseOfficeAsync(tmpPath);
+    return await parseOffice(tmpPath);
   } finally {
     fs.unlinkSync(tmpPath);
   }
