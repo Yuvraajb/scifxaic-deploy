@@ -30,7 +30,8 @@ async function extractPptx(buffer) {
   const tmpPath = path.join(os.tmpdir(), `upload_${Date.now()}.pptx`);
   try {
     fs.writeFileSync(tmpPath, buffer);
-    return await parseOffice(tmpPath);
+    const ast = await parseOffice(tmpPath);
+    return typeof ast === 'string' ? ast : ast.toText();
   } finally {
     fs.unlinkSync(tmpPath);
   }
