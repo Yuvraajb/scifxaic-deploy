@@ -43,3 +43,6 @@ markdown_docs_build/
 *.njsproj
 *.sln
 *.sw?
+
+# classifier audit log (ephemeral)
+overviews/

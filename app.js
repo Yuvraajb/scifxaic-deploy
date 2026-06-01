@@ -10,7 +10,9 @@ const requiredEnv = [
   'SLACK_BOT_TOKEN',
   'SUPABASE_URL',
   'SUPABASE_SERVICE_ROLE_KEY',
-  'GROQ_API_KEY',
+  'OPENAI_API_KEY',
+  'FINNHUB_API_KEY',
+  'SLACK_CHANNEL_ID',
 ];
 
 const missingEnv = requiredEnv.filter(key => !process.env[key]);
@@ -779,4 +781,19 @@ app.error(async (error) => {
       });
     }, 4 * 60 * 1000);
   }
+
+  // News classification agent: poll Finnhub -> classify -> dispatch HIGH_ALERT /
+  // monthly digest to Slack, on 3 weekday ET slots (08:30 / 13:00 / 16:30).
+  // The classifier is an ES module, so it is loaded with dynamic import(); the
+  // keepalive ping above keeps this (free) web service warm between slots so the
+  // in-process scheduler survives idle gaps. Failures here must NOT take down the
+  // HTTP server, so the promise is isolated with .catch().
+  import('./classifier/src/run.js')
+    .then(({ scheduleLoop }) => {
+      console.log('[AGENT] starting news classifier scheduler (3 ET slots/weekday)');
+      return scheduleLoop();
+    })
+    .catch(err =>
+      console.error('[AGENT ERROR] classifier scheduler failed to start:', err.message)
+    );
 })();

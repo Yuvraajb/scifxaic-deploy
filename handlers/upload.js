@@ -4,11 +4,11 @@ const os = require('os');
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
 const { parseOffice } = require('officeparser');
-const GroqSDK = require('groq-sdk');
+const OpenAILib = require('openai');
 
-const Groq = GroqSDK.default || GroqSDK;
+const OpenAI = OpenAILib.default || OpenAILib;
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Download a Slack private file using the bot token for auth.
 async function downloadFile(url, token) {
@@ -52,11 +52,11 @@ function cleanText(text) {
     .trim();
 }
 
-// Use Groq to extract both the ticker symbol and investment thesis from slide text.
+// Use OpenAI to extract both the ticker symbol and investment thesis from slide text.
 // Returns { ticker, thesis }.
 async function extractTickerAndThesis(text) {
-  const completion = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
+  const completion = await openai.chat.completions.create({
+    model: process.env.LLM_MODEL || 'gpt-5.5',
     messages: [
       {
         role: 'system',
@@ -78,7 +78,7 @@ async function extractTickerAndThesis(text) {
     // Fallback: try to pull JSON out of any surrounding text
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) return JSON.parse(match[0]);
-    throw new Error(`Could not parse Groq response as JSON: ${raw}`);
+    throw new Error(`Could not parse OpenAI response as JSON: ${raw}`);
   }
 }
 

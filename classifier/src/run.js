@@ -90,7 +90,7 @@ const formatEastern = (date) =>
     timeZoneName: 'short',
   }).format(date);
 
-async function cycle() {
+export async function cycle() {
   const t0 = Date.now();
   console.log(`\n── cycle start ${new Date().toISOString()} ──`);
   try {
@@ -104,7 +104,7 @@ async function cycle() {
   console.log(`── cycle done in ${Math.round((Date.now() - t0) / 1000)}s ──`);
 }
 
-async function scheduleLoop() {
+export async function scheduleLoop() {
   console.log('scheduler: 3 pulls/weekday at 08:30, 13:00, 16:30 ET');
   while (true) {
     const waitMs = msUntilNextSlot();
@@ -117,10 +117,16 @@ async function scheduleLoop() {
   }
 }
 
-// `--now` runs a single cycle and exits — useful for deploy verification.
-if (process.argv.includes('--now')) {
-  await cycle();
-  process.exit(0);
-} else {
-  await scheduleLoop();
+// Auto-run ONLY when launched directly (`node src/run.js [--now]`). When this
+// module is imported (e.g. by the hosted app.js), nothing runs until the caller
+// invokes scheduleLoop() or cycle() — so importing it has no side effects.
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  // `--now` runs a single cycle and exits — useful for deploy verification.
+  if (process.argv.includes('--now')) {
+    await cycle();
+    process.exit(0);
+  } else {
+    await scheduleLoop();
+  }
 }
