@@ -12,7 +12,7 @@ export default function UploadModal({ onClose, onSuccess }: Props) {
   const [dragging, setDragging] = useState(false);
   const [companyName, setCompanyName] = useState('');
   const [ticker, setTicker] = useState('');
-  const [sector, setSector] = useState(SECTORS[0]);
+  const [sector, setSector] = useState<string>(SECTORS[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
