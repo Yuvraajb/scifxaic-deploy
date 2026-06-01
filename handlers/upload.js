@@ -87,7 +87,8 @@ async function processFile({ downloadUrl, fileType, slackToken }) {
   const buffer = await downloadFile(downloadUrl, slackToken);
   const rawText = await extractText(buffer, fileType);
   const cleanedText = cleanText(rawText);
-  return extractTickerAndThesis(cleanedText);
+  const result = await extractTickerAndThesis(cleanedText);
+  return { ...result, buffer };
 }
 
 // Buffer-based version for direct API uploads (no Slack download needed).

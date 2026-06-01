@@ -7,13 +7,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-function buildInvestmentRow({ ticker, companyName, sector, thesis, slackIds, attribution }) {
+function buildInvestmentRow({ ticker, companyName, sector, thesis, fileUrl, slackIds, attribution }) {
   return {
     ticker,
     company_name: companyName || ticker,
     sector: sector || null,
     slack_ids: slackIds,
     thesis,
+    file_url: fileUrl || null,
     deck_creator: attribution.deckCreator,
     investment_maker: attribution.investmentMaker,
     thesis_contributors: attribution.thesisContributors,

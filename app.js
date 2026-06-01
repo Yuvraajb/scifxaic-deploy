@@ -86,11 +86,23 @@ receiver.router.post('/api/upload', requireAuth, upload.single('file'), async (r
     const companyName = req.body.companyName || ticker;
     const sector = req.body.sector || null;
 
+    // Upload file to Supabase Storage
+    let fileUrl = null;
+    const storagePath = `${Date.now()}-${ticker}.${ext}`;
+    const { error: uploadErr } = await supabaseAdmin.storage
+      .from('pitch-decks')
+      .upload(storagePath, file.buffer, { contentType: file.mimetype, upsert: false });
+    if (!uploadErr) {
+      const { data: urlData } = supabaseAdmin.storage.from('pitch-decks').getPublicUrl(storagePath);
+      fileUrl = urlData?.publicUrl || null;
+    }
+
     const { error } = await supabaseAdmin.from('investment_tracker').insert({
       ticker,
       company_name: companyName,
       sector,
       thesis,
+      file_url: fileUrl,
       deck_creator: req.profile.name || req.user.email,
       slack_ids: [],
     });
@@ -287,11 +299,26 @@ async function saveDeckAttribution({ deckId, attribution, client, fallbackChanne
     return;
   }
 
+  let fileUrl = null;
+  if (deck.fileBuffer && deck.fileType) {
+    const storagePath = `${Date.now()}-${deck.ticker}.${deck.fileType}`;
+    const mime = deck.fileType === 'pdf' ? 'application/pdf'
+      : 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    const { error: uploadErr } = await supabaseAdmin.storage
+      .from('pitch-decks')
+      .upload(storagePath, deck.fileBuffer, { contentType: mime, upsert: false });
+    if (!uploadErr) {
+      const { data: urlData } = supabaseAdmin.storage.from('pitch-decks').getPublicUrl(storagePath);
+      fileUrl = urlData?.publicUrl || null;
+    }
+  }
+
   await saveInvestment({
     ticker: deck.ticker,
     companyName: deck.companyName || deck.ticker,
     sector: deck.sector || null,
     thesis: deck.thesis,
+    fileUrl,
     slackIds: deck.slackIds,
     attribution,
   });
@@ -482,7 +509,7 @@ app.event('message', async ({ event: message, client, say }) => {
       }
 
       console.log(`[PROCESS] starting extraction for file ${file.id} type=${file.filetype}`);
-      const { ticker, thesis } = await processFile({
+      const { ticker, thesis, buffer: fileBuffer } = await processFile({
         fileType,
         downloadUrl,
         slackToken: process.env.SLACK_BOT_TOKEN,
@@ -495,6 +522,8 @@ app.event('message', async ({ event: message, client, say }) => {
         ticker,
         companyName: ticker,
         thesis,
+        fileBuffer,
+        fileType,
         slackIds: pending.slackIds,
         uploaderName,
         channel,

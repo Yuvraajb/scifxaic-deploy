@@ -15,6 +15,7 @@ export interface Deck {
   company_name: string | null;
   sector: string | null;
   thesis: string | null;
+  file_url: string | null;
   deck_creator: string | null;
   investment_maker: string | null;
   thesis_contributors: string | null;
