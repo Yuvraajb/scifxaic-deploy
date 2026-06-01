@@ -273,7 +273,7 @@ async function handleSubscribeCommand({ command, ack, client }) {
 // Slash command: /deck [@user1 @user2 ...]
 // Optional mentions associate additional Slack users with the investment.
 // The invoker is always included. Ticker is detected from the deck automatically.
-app.command('/deck', handleDeckUploadCommand);
+app.command('/upload', handleDeckUploadCommand);
 
 app.command('/subscribe', handleSubscribeCommand);
 
