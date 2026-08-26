@@ -33,3 +33,9 @@ create policy "authenticated read own profile"
   on public.profiles for select
   to authenticated
   using (id = auth.uid());
+
+-- Live dashboard refresh: broadcast investment_tracker changes over Realtime
+-- (docs/supabase_docs/guides/realtime/postgres-changes.md — tables must be
+-- added to the supabase_realtime publication; RLS still gates who receives
+-- events, so only authenticated users get them).
+alter publication supabase_realtime add table public.investment_tracker;

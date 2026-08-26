@@ -37,6 +37,23 @@ export default function Dashboard() {
 
   useEffect(() => { fetchDecks(); }, [fetchDecks]);
 
+  // Live refresh: refetch whenever investment_tracker changes (deck uploaded
+  // via Slack or API, sector moved by another user). The table is in the
+  // supabase_realtime publication (migration 0002); RLS decides what we see,
+  // so the refetch re-applies the same sector filter as the initial load.
+  useEffect(() => {
+    if (!profile) return;
+    const channel = supabase
+      .channel('investment-tracker-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'investment_tracker' },
+        () => { fetchDecks(); }
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [profile, fetchDecks]);
+
   function handleDragStart(deck: Deck) {
     draggingDeck.current = deck;
   }
