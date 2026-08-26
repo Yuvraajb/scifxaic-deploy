@@ -91,6 +91,14 @@ const formatEastern = (date) =>
     timeZoneName: 'short',
   }).format(date);
 
+// Next scheduled pull, for status surfaces (e.g. the /status Slack command).
+// Returns the wait in ms, the absolute Date, and a human ET label.
+export function nextSlotInfo() {
+  const waitMs = msUntilNextSlot();
+  const nextAt = new Date(Date.now() + waitMs);
+  return { waitMs, nextAt, label: formatEastern(nextAt) };
+}
+
 export async function cycle() {
   const t0 = Date.now();
   console.log(`\n── cycle start ${new Date().toISOString()} ──`);
