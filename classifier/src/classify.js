@@ -48,6 +48,11 @@ const model = new ChatOpenAI({
   model: MODEL,
   // gpt-5.5 rejects any temperature other than the default (1); omit the field.
   apiKey: process.env.OPENAI_API_KEY,
+  // Budget tiers (gpt-5.6-luna) reject function tools on /v1/chat/completions
+  // unless reasoning_effort is 'none'. 'none' also suits this workload — the
+  // agent's structure does the reasoning, not hidden chain-of-thought. Override
+  // via LLM_REASONING_EFFORT if a flagship model needs it back.
+  reasoning: { effort: process.env.LLM_REASONING_EFFORT || 'none' },
 });
 
 const classificationAgent = createAgent({
