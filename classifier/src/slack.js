@@ -159,15 +159,25 @@ const LABEL_MARKER = {
   [LABELS.IGNORE]: ':white_circle:',
 };
 
+// Slack mrkdwn requires these three escaped everywhere, and especially inside
+// <url|label> links, where a raw & or > corrupts the whole block
+// (invalid_blocks). See Slack "Formatting text for app surfaces".
+function escapeMrkdwn(text) {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 // One outline line per scanned article: marker + linked headline.
 function cycleItemLine(item) {
-  const headline = item.headline.length > 120 ? `${item.headline.slice(0, 117)}…` : item.headline;
+  const raw = item.headline.length > 120 ? `${item.headline.slice(0, 117)}…` : item.headline;
+  const headline = escapeMrkdwn(raw);
   const linked = item.url ? `<${item.url}|${headline}>` : headline;
   return `${LABEL_MARKER[item.label] || ':white_circle:'} ${linked}`;
 }
 
-// Group the cycle's articles by ticker and pack them into section blocks,
-// respecting Slack's per-section text limit (same packing as the monthly digest).
+// Group the cycle's articles by ticker and pack the lines into section blocks.
+// Packing is line-by-line (not group-by-group) so a single busy ticker larger
+// than the section limit still splits cleanly instead of producing an
+// oversized section that Slack rejects wholesale.
 function buildCycleOutlineBlocks(items) {
   const byTicker = new Map();
   for (const item of items) {
@@ -175,15 +185,23 @@ function buildCycleOutlineBlocks(items) {
     byTicker.get(item.ticker).push(item);
   }
 
+  const lines = [];
+  for (const [ticker, tickerItems] of byTicker) {
+    lines.push(`*$${ticker}*`);
+    lines.push(...tickerItems.map(cycleItemLine));
+    lines.push(''); // blank line between ticker groups
+  }
+  if (lines[lines.length - 1] === '') lines.pop();
+
   const blocks = [];
   let buffer = '';
-  for (const [ticker, tickerItems] of byTicker) {
-    const group = [`*$${ticker}*`, ...tickerItems.map(cycleItemLine)].join('\n');
-    if (buffer && buffer.length + group.length + 2 > SECTION_TEXT_LIMIT) {
+  for (const line of lines) {
+    if (buffer && buffer.length + line.length + 1 > SECTION_TEXT_LIMIT) {
       blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
       buffer = '';
+      if (line === '') continue; // no leading blank line in a fresh section
     }
-    buffer = buffer ? `${buffer}\n\n${group}` : group;
+    buffer = buffer ? `${buffer}\n${line}` : line;
   }
   if (buffer) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
   return blocks;
