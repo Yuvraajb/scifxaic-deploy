@@ -1,2 +1,57 @@
-node_modules/
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment — never commit real keys
 .env
+.env.local
+
+# Python
+__pycache__/
+slack-bot/venv/
+slack-bot/__pycache__/
+slack-bot/*.pyc
+slack-bot/seen_articles.json
+slack-bot/digest_queue.json
+
+# Local agent state and transient tooling output — never tracked
+.claude/
+supabase/.temp/
+
+# Planning/design docs — kept local, not pushed to the remote
+combine.md
+render.md
+docs/markdown_docs_build/
+
+# Scraped reference docs — local only
+docs/finnhub_docs/
+docs/langchain_docs/
+docs/render_docs/
+docs/slack_docs/
+docs/supabase_docs/
+scrape_supabase_docs.py
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# classifier audit log (ephemeral)
+overviews/
+.env.bak

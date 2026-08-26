@@ -1,0 +1,27 @@
+{
+  "name": "scif-classifier",
+  "version": "1.0.0",
+  "description": "SCIF Thesis Tracker — Finnhub poller + LangChain classification agent + Slack notifier",
+  "type": "module",
+  "main": "src/run.js",
+  "scripts": {
+    "seed": "node src/seed.js",
+    "poll": "node src/finnhub.js",
+    "classify": "node src/classify.js",
+    "dispatch": "node src/dispatch.js",
+    "start": "node src/run.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@langchain/core": "^1.1.48",
+    "@supabase/supabase-js": "^2.103.0",
+    "@langchain/openai": "^1.4.7",
+    "axios": "^1.16.1",
+    "dotenv": "^17.4.2",
+    "langchain": "^1.4.2",
+    "pdf-parse": "^2.4.5",
+    "zod": "^4.4.3"
+  }
+}

@@ -3,12 +3,57 @@ const path = require('path');
 const os = require('os');
 const axios = require('axios');
 const pdfParse = require('pdf-parse');
-const officeParser = require('officeparser');
-const GroqSDK = require('groq-sdk');
+const { parseOffice } = require('officeparser');
+const { ChatOpenAI } = require('@langchain/openai');
+const { z } = require('zod');
 
-const Groq = GroqSDK.default || GroqSDK;
+const MODEL = process.env.LLM_MODEL || 'gpt-5.5';
+// Structured thesis (5 arrays) needs more room than the old 500-token cap.
+const MAX_OUTPUT_TOKENS = 1500;
+const MAX_DECK_TEXT_CHARS = 8000;
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// Structured-output schema. LangChain validates the model's response against
+// this and returns a typed object, replacing the old manual JSON.parse.
+//
+// structuredThesis mirrors the shape the classifier agent reads from
+// theses.structured_json (see classifier/src/seed.js) — its rationale must cite
+// specific thesis elements, so the deck extraction produces those elements here.
+const TickerThesisSchema = z.object({
+  ticker: z
+    .string()
+    .describe(
+      'Ticker symbol, e.g. AAPL. If no standard ticker is found, infer the closest match or use the company name in uppercase.',
+    ),
+  thesis: z.string().describe('Central investment thesis in 2-4 sentences.'),
+  structuredThesis: z.object({
+    growth_drivers: z
+      .array(z.string())
+      .describe('What must go right for the investment to work.'),
+    risks: z
+      .array(z.string())
+      .describe('What could break the thesis.'),
+    catalysts: z
+      .array(z.string())
+      .describe('Specific upcoming events that would confirm or advance the thesis.'),
+    valuation_assumptions: z
+      .array(z.string())
+      .describe('Quantitative assumptions the valuation rests on (margins, growth rates).'),
+    key_metrics: z
+      .array(z.string())
+      .describe('Metrics to monitor in future news, e.g. "Gross margin".'),
+  }).describe(
+    'The thesis decomposed into monitorable elements. Extract from the deck; keep each item to one sentence. Use empty arrays for elements the deck does not cover.',
+  ),
+});
+
+const model = new ChatOpenAI({
+  model: MODEL,
+  // gpt-5.5 rejects any temperature other than the default (1); omit the field.
+  apiKey: process.env.OPENAI_API_KEY,
+  maxTokens: MAX_OUTPUT_TOKENS,
+});
+
+const extractor = model.withStructuredOutput(TickerThesisSchema);
 
 // Download a Slack private file using the bot token for auth.
 async function downloadFile(url, token) {
@@ -30,7 +75,8 @@ async function extractPptx(buffer) {
   const tmpPath = path.join(os.tmpdir(), `upload_${Date.now()}.pptx`);
   try {
     fs.writeFileSync(tmpPath, buffer);
-    return await officeParser.parseOfficeAsync(tmpPath);
+    const ast = await parseOffice(tmpPath);
+    return typeof ast === 'string' ? ast : ast.toText();
   } finally {
     fs.unlinkSync(tmpPath);
   }
@@ -51,42 +97,40 @@ function cleanText(text) {
     .trim();
 }
 
-// Use Groq to extract both the ticker symbol and investment thesis from slide text.
-// Returns { ticker, thesis }.
+// Extract the ticker symbol and investment thesis from slide text via LangChain
+// structured output. Returns a validated { ticker, thesis, structuredThesis };
+// throws on schema-validation failure instead of the old JSON-parse rescue.
 async function extractTickerAndThesis(text) {
-  const completion = await groq.chat.completions.create({
-    model: 'llama-3.3-70b-versatile',
-    messages: [
-      {
-        role: 'system',
-        content:
-          'You are an expert investment analyst. Given the text of a pitch deck or investment presentation, extract two things:\n1. The ticker symbol of the company being presented (e.g. AAPL, TSLA). If no standard ticker is found, infer the closest match or use the company name in uppercase.\n2. The central investment thesis in 2–4 sentences.\n\nRespond ONLY with valid JSON in this exact format:\n{"ticker": "AAPL", "thesis": "..."}',
-      },
-      {
-        role: 'user',
-        content: `Extract the ticker and thesis from this presentation:\n\n${text.slice(0, 8000)}`,
-      },
-    ],
-    max_tokens: 500,
-  });
+  return extractor.invoke([
+    {
+      role: 'system',
+      content:
+        'You are an expert investment analyst. Given the text of a pitch deck or investment presentation, extract the ticker symbol of the company being presented (e.g. AAPL, TSLA), its central investment thesis in 2-4 sentences, and the thesis decomposed into growth drivers, risks, catalysts, valuation assumptions, and key metrics to monitor.',
+    },
+    {
+      role: 'user',
+      content: `Extract the ticker and thesis from this presentation:\n\n${text.slice(0, MAX_DECK_TEXT_CHARS)}`,
+    },
+  ]);
+}
 
-  const raw = completion.choices[0].message.content.trim();
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // Fallback: try to pull JSON out of any surrounding text
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error(`Could not parse Groq response as JSON: ${raw}`);
-  }
+async function extractAndClean(buffer, fileType) {
+  const rawText = await extractText(buffer, fileType);
+  return cleanText(rawText);
 }
 
 // Orchestrate download → extract → clean → LLM.
 async function processFile({ downloadUrl, fileType, slackToken }) {
   const buffer = await downloadFile(downloadUrl, slackToken);
-  const rawText = await extractText(buffer, fileType);
-  const cleanedText = cleanText(rawText);
+  const cleanedText = await extractAndClean(buffer, fileType);
+  const result = await extractTickerAndThesis(cleanedText);
+  return { ...result, buffer };
+}
+
+// Buffer-based version for direct API uploads (no Slack download needed).
+async function processFileBuffer({ buffer, fileType }) {
+  const cleanedText = await extractAndClean(buffer, fileType);
   return extractTickerAndThesis(cleanedText);
 }
 
-module.exports = { processFile };
+module.exports = { processFile, processFileBuffer };
