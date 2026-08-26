@@ -50,6 +50,49 @@ app.command('/hello', async ({ command, ack, respond }) => {
   await respond(`Hey <@${command.user_id}>! The bot is alive and working!`);
 });
 
+// Slash command: /status — liveness check + countdown to the next news poll.
+app.command('/status', async ({ command, ack, respond }) => {
+  await ack();
+  try {
+    // Dynamic import: the classifier is an ES module (same pattern as startup).
+    const { nextSlotInfo } = await import('./classifier/src/run.js');
+    const { waitMs, label } = nextSlotInfo();
+    const minutes = Math.round(waitMs / 60000);
+    const countdown =
+      minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+
+    const supabaseAdmin = require('./lib/supabaseAdmin');
+    const { data: lastIngest } = await supabaseAdmin
+      .from('articles')
+      .select('ingested_at')
+      .order('ingested_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const { count: watched } = await supabaseAdmin
+      .from('companies')
+      .select('*', { count: 'exact', head: true })
+      .eq('active', true);
+
+    const uptimeMin = Math.floor(process.uptime() / 60);
+    const lastIngestStr = lastIngest?.ingested_at
+      ? new Date(lastIngest.ingested_at).toLocaleString('en-US', {
+          timeZone: 'America/New_York',
+          month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+        }) + ' ET'
+      : 'never';
+
+    await respond(
+      `:white_check_mark: *Service live* — up ${Math.floor(uptimeMin / 60)}h ${uptimeMin % 60}m\n` +
+      `:clock3: Next news poll: *${label}* (in ${countdown})\n` +
+      `:inbox_tray: Last article ingested: ${lastIngestStr}\n` +
+      `:eyes: Watching ${watched ?? '?'} active compan${watched === 1 ? 'y' : 'ies'}`
+    );
+  } catch (err) {
+    console.error('[STATUS ERROR]', err.message);
+    await respond(`:warning: Service is up, but status details failed: ${err.message}`);
+  }
+});
+
 require('./slack/deckUpload')(app);
 require('./slack/subscriptions')(app);
 
