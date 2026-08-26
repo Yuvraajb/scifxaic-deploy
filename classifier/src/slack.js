@@ -151,6 +151,25 @@ export async function postMonthlyOverview(articles, monthLabel) {
   });
 }
 
+// Post a one-line heartbeat after every poll cycle, whatever the outcome, so
+// the channel shows the pipeline is alive even when nothing was thesis-relevant.
+// e.g. "🔄 News poll — 12 new · 1 HIGH ALERT · 3 monthly · 8 ignored"
+export async function postCycleSummary({ inserted, classified, byLabel }) {
+  const parts = [`${inserted} new article${inserted === 1 ? '' : 's'}`];
+  if (classified > 0) {
+    parts.push(`${byLabel[LABELS.HIGH_ALERT] || 0} HIGH ALERT`);
+    parts.push(`${byLabel[LABELS.MONTHLY_OVERVIEW] || 0} monthly`);
+    parts.push(`${byLabel[LABELS.IGNORE] || 0} ignored`);
+  } else if (inserted === 0) {
+    parts.push('nothing new to classify');
+  }
+  const text = `:arrows_counterclockwise: News poll — ${parts.join(' · ')}`;
+  return postToSlack({
+    text,
+    blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }],
+  });
+}
+
 // Shared chat.postMessage call. No-op (logs a warning) when SLACK_BOT_TOKEN or
 // SLACK_CHANNEL_ID is missing, so local runs without Slack credentials work.
 async function postToSlack({ text, blocks }) {
