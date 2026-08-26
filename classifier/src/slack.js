@@ -151,10 +151,50 @@ export async function postMonthlyOverview(articles, monthLabel) {
   });
 }
 
-// Post a one-line heartbeat after every poll cycle, whatever the outcome, so
+// Marker per label for the cycle outline. IGNORE items are listed too — the
+// point of the summary is proving what was scanned, not only what mattered.
+const LABEL_MARKER = {
+  [LABELS.HIGH_ALERT]: ':red_circle:',
+  [LABELS.MONTHLY_OVERVIEW]: ':large_yellow_circle:',
+  [LABELS.IGNORE]: ':white_circle:',
+};
+
+// One outline line per scanned article: marker + linked headline.
+function cycleItemLine(item) {
+  const headline = item.headline.length > 120 ? `${item.headline.slice(0, 117)}…` : item.headline;
+  const linked = item.url ? `<${item.url}|${headline}>` : headline;
+  return `${LABEL_MARKER[item.label] || ':white_circle:'} ${linked}`;
+}
+
+// Group the cycle's articles by ticker and pack them into section blocks,
+// respecting Slack's per-section text limit (same packing as the monthly digest).
+function buildCycleOutlineBlocks(items) {
+  const byTicker = new Map();
+  for (const item of items) {
+    if (!byTicker.has(item.ticker)) byTicker.set(item.ticker, []);
+    byTicker.get(item.ticker).push(item);
+  }
+
+  const blocks = [];
+  let buffer = '';
+  for (const [ticker, tickerItems] of byTicker) {
+    const group = [`*$${ticker}*`, ...tickerItems.map(cycleItemLine)].join('\n');
+    if (buffer && buffer.length + group.length + 2 > SECTION_TEXT_LIMIT) {
+      blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
+      buffer = '';
+    }
+    buffer = buffer ? `${buffer}\n\n${group}` : group;
+  }
+  if (buffer) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: buffer } });
+  return blocks;
+}
+
+// Post one heartbeat message after every poll cycle, whatever the outcome, so
 // the channel shows the pipeline is alive even when nothing was thesis-relevant.
-// e.g. "🔄 News poll — 12 new · 1 HIGH ALERT · 3 monthly · 8 ignored"
-export async function postCycleSummary({ inserted, classified, byLabel }) {
+// Header line carries the counts; when articles were scanned, a combined
+// outline (grouped by ticker, one linked headline per article) follows in the
+// same message.
+export async function postCycleSummary({ inserted, classified, byLabel, items = [] }) {
   const parts = [`${inserted} new article${inserted === 1 ? '' : 's'}`];
   if (classified > 0) {
     parts.push(`${byLabel[LABELS.HIGH_ALERT] || 0} HIGH ALERT`);
@@ -163,11 +203,12 @@ export async function postCycleSummary({ inserted, classified, byLabel }) {
   } else if (inserted === 0) {
     parts.push('nothing new to classify');
   }
-  const text = `:arrows_counterclockwise: News poll — ${parts.join(' · ')}`;
-  return postToSlack({
-    text,
-    blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text }] }],
-  });
+  const headline = `:arrows_counterclockwise: News poll — ${parts.join(' · ')}`;
+
+  const blocks = [{ type: 'context', elements: [{ type: 'mrkdwn', text: headline }] }];
+  if (items.length > 0) blocks.push(...buildCycleOutlineBlocks(items));
+
+  return postToSlack({ text: headline, blocks });
 }
 
 // Shared chat.postMessage call. No-op (logs a warning) when SLACK_BOT_TOKEN or
