@@ -50,8 +50,9 @@ app.command('/hello', async ({ command, ack, respond }) => {
   await respond(`Hey <@${command.user_id}>! The bot is alive and working!`);
 });
 
-// Slash command: /status — liveness check + countdown to the next news poll.
-app.command('/status', async ({ command, ack, respond }) => {
+// Slash command: /scif-status — liveness check + countdown to the next news
+// poll. (/status itself is reserved by Slack and cannot be registered.)
+app.command('/scif-status', async ({ command, ack, respond }) => {
   await ack();
   try {
     // Dynamic import: the classifier is an ES module (same pattern as startup).
