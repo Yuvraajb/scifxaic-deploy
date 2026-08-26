@@ -19,6 +19,7 @@ import { pollFinnhub } from './finnhub.js';
 import { classifyAllPending } from './classify.js';
 import { dispatchAll } from './dispatch.js';
 import { maybeSendMonthlyOverview } from './monthly.js';
+import { postCycleSummary } from './slack.js';
 import { isMainModule } from './util.js';
 
 // Daily pull times, as minutes-after-midnight Eastern Time.
@@ -103,10 +104,13 @@ export async function cycle() {
   const t0 = Date.now();
   console.log(`\n── cycle start ${new Date().toISOString()} ──`);
   try {
-    await pollFinnhub();
-    await classifyAllPending();
+    const inserted = await pollFinnhub();
+    const { count: classified, byLabel } = await classifyAllPending();
     await dispatchAll();
     await maybeSendMonthlyOverview();
+    // Heartbeat: post a per-cycle summary even when nothing was relevant, so
+    // the channel itself proves each scheduled poll ran.
+    await postCycleSummary({ inserted, classified, byLabel });
   } catch (e) {
     console.error('cycle error:', e);
   }

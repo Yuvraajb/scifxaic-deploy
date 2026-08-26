@@ -109,8 +109,11 @@ export async function classifyNext() {
   return { ...row, label: post.classification, rationale: post.rationale };
 }
 
+// Classify every pending article. Returns { count, byLabel } so the cycle
+// summary can report a per-label breakdown (e.g. { HIGH_ALERT: 1, IGNORE: 7 }).
 export async function classifyAllPending() {
   let count = 0;
+  const byLabel = {};
   while (true) {
     let r;
     try {
@@ -121,14 +124,15 @@ export async function classifyAllPending() {
     }
     if (!r) break;
     count++;
+    byLabel[r.label] = (byLabel[r.label] || 0) + 1;
     console.log(`classified article ${r.id} (${r.ticker}) -> ${r.label}`);
   }
-  return count;
+  return { count, byLabel };
 }
 
 if (isMainModule(import.meta.url)) {
-  classifyAllPending().then((n) => {
-    console.log(`done; classified ${n} articles`);
+  classifyAllPending().then(({ count }) => {
+    console.log(`done; classified ${count} articles`);
     process.exit(0);
   });
 }
