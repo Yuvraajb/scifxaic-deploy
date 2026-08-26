@@ -31,7 +31,15 @@ supabase/.temp/
 # Planning/design docs — kept local, not pushed to the remote
 combine.md
 render.md
-markdown_docs_build/
+docs/markdown_docs_build/
+
+# Scraped reference docs — local only
+docs/finnhub_docs/
+docs/langchain_docs/
+docs/render_docs/
+docs/slack_docs/
+docs/supabase_docs/
+scrape_supabase_docs.py
 
 # Editor directories and files
 .vscode/*
@@ -46,3 +54,4 @@ markdown_docs_build/
 
 # classifier audit log (ephemeral)
 overviews/
+.env.bak

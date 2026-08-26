@@ -1,13 +1,9 @@
-const { createClient } = require('@supabase/supabase-js');
+const supabase = require('../lib/supabaseAdmin');
+const assertNoSupabaseError = require('../lib/assertNoSupabaseError');
 
 const INVESTMENT_TRACKER_TABLE = 'investment_tracker';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
-function buildInvestmentRow({ ticker, companyName, sector, thesis, fileUrl, slackIds, attribution }) {
+function buildInvestmentRow({ ticker, companyName, sector, thesis, fileUrl, slackIds, attribution = {} }) {
   return {
     ticker,
     company_name: companyName || ticker,
@@ -23,9 +19,8 @@ function buildInvestmentRow({ ticker, companyName, sector, thesis, fileUrl, slac
 
 async function saveInvestment(investment) {
   const row = buildInvestmentRow(investment);
-  const { error } = await supabase.from(INVESTMENT_TRACKER_TABLE).insert(row);
-
-  if (error) throw new Error(`Supabase insert failed: ${error.message}`);
+  const result = await supabase.from(INVESTMENT_TRACKER_TABLE).insert(row);
+  assertNoSupabaseError(result, 'Supabase insert failed');
 
   return { ticker: row.ticker, thesis: row.thesis };
 }

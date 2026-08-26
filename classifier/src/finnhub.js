@@ -2,8 +2,9 @@ import { config as loadEnv } from 'dotenv';
 loadEnv({ override: true });
 import axios from 'axios';
 import { getActiveCompanies, insertArticle } from './repo.js';
+import { isMainModule } from './util.js';
 
-// Per finnhub_docs/company-news.md (free, NA-only):
+// Per docs/finnhub_docs/company-news.md (free, NA-only):
 //   GET /api/v1/company-news?symbol&from&to&token
 //   returns array of { id, category, datetime, headline, summary, url, source, related, image }
 // Headline + summary + url is all we get on free tier. No body field.
@@ -11,12 +12,14 @@ const BASE = 'https://finnhub.io/api/v1';
 const KEY = process.env.FINNHUB_API_KEY;
 if (!KEY) throw new Error('FINNHUB_API_KEY missing');
 const MAX_PER_TICKER = 5;
+const FINNHUB_REQUEST_TIMEOUT_MS = 15000;
+const FINNHUB_RATE_LIMIT_DELAY_MS = 250;
 
 const ymd = (d) => d.toISOString().slice(0, 10);
 
 async function fetchCompanyNews(ticker, fromDate, toDate) {
   const url = `${BASE}/company-news?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${KEY}`;
-  const res = await axios.get(url, { timeout: 15000 });
+  const res = await axios.get(url, { timeout: FINNHUB_REQUEST_TIMEOUT_MS });
   return res.data ?? [];
 }
 
@@ -47,7 +50,7 @@ export async function pollFinnhub() {
         if (wasInserted) inserted++;
       }
       console.log(`finnhub: ${c.ticker} -> ${allItems.length} returned, ${items.length} kept (cap ${MAX_PER_TICKER})`);
-      await new Promise((r) => setTimeout(r, 250)); // pace under 30 req/s
+      await new Promise((r) => setTimeout(r, FINNHUB_RATE_LIMIT_DELAY_MS)); // pace under 30 req/s
     } catch (e) {
       console.error(`finnhub error for ${c.ticker}:`, e.message);
     }
@@ -56,6 +59,6 @@ export async function pollFinnhub() {
   return inserted;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   pollFinnhub().then(() => process.exit(0));
 }

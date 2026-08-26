@@ -1,24 +1,21 @@
-const { createClient } = require('@supabase/supabase-js');
+const supabase = require('../lib/supabaseAdmin');
+const assertNoSupabaseError = require('../lib/assertNoSupabaseError');
+const capitalize = require('../lib/capitalize');
 
 const USER_SUBSCRIPTION_PREFERENCES_TABLE = 'user_subscription_preferences';
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
 
 /**
  * @param {string} slackUserId
  * @returns {Promise<string[]>}
  */
 async function getSectorsForSlackUser(slackUserId) {
-  const { data, error } = await supabase
+  const result = await supabase
     .from(USER_SUBSCRIPTION_PREFERENCES_TABLE)
     .select('sectors')
     .eq('slack_user_id', slackUserId)
     .maybeSingle();
+  const data = assertNoSupabaseError(result, 'Supabase fetch failed');
 
-  if (error) throw new Error(`Supabase fetch failed: ${error.message}`);
   if (!data?.sectors) return [];
   return Array.isArray(data.sectors) ? data.sectors : [];
 }
@@ -29,7 +26,7 @@ async function getSectorsForSlackUser(slackUserId) {
  */
 async function upsertSubscriptionSectors(slackUserId, sectors) {
   const now = new Date().toISOString();
-  const { error } = await supabase.from(USER_SUBSCRIPTION_PREFERENCES_TABLE).upsert(
+  const result = await supabase.from(USER_SUBSCRIPTION_PREFERENCES_TABLE).upsert(
     {
       slack_user_id: slackUserId,
       sectors: sectors ?? [],
@@ -37,11 +34,11 @@ async function upsertSubscriptionSectors(slackUserId, sectors) {
     },
     { onConflict: 'slack_user_id' }
   );
-
-  if (error) throw new Error(`Supabase upsert failed: ${error.message}`);
+  assertNoSupabaseError(result, 'Supabase upsert failed');
 
   // Sync to frontend profiles table so dashboard reflects Slack subscriptions.
-  const capitalized = (sectors ?? []).map(s => s.charAt(0).toUpperCase() + s.slice(1));
+  // Best-effort: a sync failure here does not fail the subscribe command.
+  const capitalized = (sectors ?? []).map(capitalize);
   await supabase
     .from('profiles')
     .update({ subscribed_sectors: capitalized })

@@ -19,6 +19,7 @@ import { pollFinnhub } from './finnhub.js';
 import { classifyAllPending } from './classify.js';
 import { dispatchAll } from './dispatch.js';
 import { maybeSendMonthlyOverview } from './monthly.js';
+import { isMainModule } from './util.js';
 
 // Daily pull times, as minutes-after-midnight Eastern Time.
 const SLOTS_ET = [
@@ -120,7 +121,7 @@ export async function scheduleLoop() {
 // Auto-run ONLY when launched directly (`node src/run.js [--now]`). When this
 // module is imported (e.g. by the hosted app.js), nothing runs until the caller
 // invokes scheduleLoop() or cycle() — so importing it has no side effects.
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   // `--now` runs a single cycle and exits — useful for deploy verification.
   if (process.argv.includes('--now')) {

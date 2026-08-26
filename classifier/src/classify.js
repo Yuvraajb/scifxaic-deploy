@@ -1,6 +1,6 @@
 // Tool-using Classification Agent.
 //
-// Sources (all under langchain_docs/oss/javascript/langchain/):
+// Sources (all under docs/langchain_docs/oss/javascript/langchain/):
 //   - agents.md  → createAgent runtime, systemPrompt, "An agent runs until a stop
 //                  condition is met - i.e., when the model emits a final output or
 //                  an iteration limit is reached."
@@ -23,6 +23,8 @@ import {
 } from './repo.js';
 import { tools } from './tools.js';
 import { dispatchOne } from './dispatch.js';
+import { LABELS } from './labels.js';
+import { isMainModule } from './util.js';
 
 const MODEL = process.env.LLM_MODEL || 'gpt-5.5';
 
@@ -88,9 +90,9 @@ export async function classifyNext() {
     }
     // Non-transient: record IGNORE so the worklist progresses.
     const rationale = `classification failed: ${e.message}`;
-    await markClassification(row.id, 'IGNORE', rationale);
+    await markClassification(row.id, LABELS.IGNORE, rationale);
     await dispatchOne({ ...(await loadFullArticle(row.id)) });
-    return { ...row, label: 'IGNORE', rationale };
+    return { ...row, label: LABELS.IGNORE, rationale };
   }
 
   // The agent terminates by calling classify_article. Verify that happened.
@@ -99,9 +101,9 @@ export async function classifyNext() {
     const rationale =
       'Agent terminated without calling classify_article; recording IGNORE so the worklist progresses.';
     console.warn(`article ${row.id}: ${rationale}`);
-    await markClassification(row.id, 'IGNORE', rationale);
+    await markClassification(row.id, LABELS.IGNORE, rationale);
     await dispatchOne({ ...(await loadFullArticle(row.id)) });
-    return { ...row, label: 'IGNORE', rationale };
+    return { ...row, label: LABELS.IGNORE, rationale };
   }
 
   return { ...row, label: post.classification, rationale: post.rationale };
@@ -124,7 +126,7 @@ export async function classifyAllPending() {
   return count;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   classifyAllPending().then((n) => {
     console.log(`done; classified ${n} articles`);
     process.exit(0);

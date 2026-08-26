@@ -11,11 +11,12 @@
 //            url, published_at, raw_json jsonb, classification, rationale,
 //            classified_at, dispatched_at, ingested_at)
 //
-// Citation: supabase_docs/reference/javascript/insert.md — "By default,
+// Citation: docs/supabase_docs/reference/javascript/insert.md — "By default,
 // inserted rows are not returned. To return it, chain the call with .select()."
 // We use .select() on inserts so callers still get the row id back.
 
 import { supabase } from './supabase.js';
+import { LABELS } from './labels.js';
 
 // Supabase returns { data, error }. Throw a clear Error on failure so the
 // caller's existing try/catch paths fire; return data otherwise.
@@ -135,7 +136,7 @@ export async function getPendingDispatch() {
     .from('articles')
     .select('*, companies(ticker)')
     .not('classification', 'is', null)
-    .neq('classification', 'MONTHLY_OVERVIEW')
+    .neq('classification', LABELS.MONTHLY_OVERVIEW)
     .is('dispatched_at', null)
     .order('published_at', { ascending: true });
   const data = unwrap(res, 'getPendingDispatch');
@@ -154,7 +155,7 @@ export async function getUndispatchedMonthlyOverview(beforeIso) {
   const res = await supabase
     .from('articles')
     .select('id, headline, summary, url, source, published_at, rationale, companies(ticker, name)')
-    .eq('classification', 'MONTHLY_OVERVIEW')
+    .eq('classification', LABELS.MONTHLY_OVERVIEW)
     .is('dispatched_at', null)
     .lt('published_at', beforeIso)
     .order('published_at', { ascending: true });

@@ -12,10 +12,16 @@
 // durable source of truth.
 
 import { mkdirSync, appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { markDispatched, getPendingDispatch } from './repo.js';
 import { notifySlack } from './slack.js';
+import { LABELS } from './labels.js';
+import { isMainModule } from './util.js';
 
-const DIR = './overviews';
+// Anchor to the module's own location so the audit log always lands in the
+// repo-root overviews/ regardless of the process cwd (standalone vs. embedded).
+const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'overviews');
 const HIGH_ALERT_FILE = `${DIR}/HIGH_ALERTS.md`;
 const MONTHLY_OVERVIEW_FILE = `${DIR}/MONTHLY_OVERVIEWS.md`;
 
@@ -66,9 +72,9 @@ export async function dispatchOne(article) {
 
   // MONTHLY_OVERVIEW is not dispatched per cycle; leave it pending so monthly.js
   // can batch it into the start-of-month digest.
-  if (article.classification === 'MONTHLY_OVERVIEW') return false;
+  if (article.classification === LABELS.MONTHLY_OVERVIEW) return false;
 
-  if (article.classification === 'HIGH_ALERT') {
+  if (article.classification === LABELS.HIGH_ALERT) {
     appendAudit(HIGH_ALERT_FILE, article);
     await notifySlack(article);
     console.log(`\n═══ HIGH_ALERT  ${article.ticker}  ${article.published_at} ═══`);
@@ -90,12 +96,12 @@ export async function dispatchAll() {
   let alerted = 0, ignored = 0;
   for (const a of rows) {
     await dispatchOne(a);
-    if (a.classification === 'HIGH_ALERT') alerted++;
+    if (a.classification === LABELS.HIGH_ALERT) alerted++;
     else ignored++;
   }
   console.log(`dispatch done: ${alerted} alerted, ${ignored} ignored`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   dispatchAll().then(() => process.exit(0));
 }

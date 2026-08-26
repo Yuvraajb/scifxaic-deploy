@@ -24,7 +24,7 @@ drop table if exists public.subscriptions         cascade;
 drop table if exists public.portfolio_companies   cascade;
 drop table if exists public.users                 cascade;
 
--- RLS rationale (supabase_docs/guides/database/postgres/row-level-security.md):
+-- RLS rationale (docs/supabase_docs/guides/database/postgres/row-level-security.md):
 --   "RLS must always be enabled on any tables stored in an exposed schema."
 --   The React frontend reads these tables from the browser with the anon key,
 --   so RLS is enabled on all four tables.

@@ -5,29 +5,35 @@
 // single source of Slack notifications; the Python bot no longer polls/classifies.
 //
 // Citations:
-//   slack_docs/messaging__sending-and-scheduling-messages.md — outbound posting
+//   docs/slack_docs/messaging__sending-and-scheduling-messages.md — outbound posting
 //     uses chat.postMessage over the Web API with a chat:write token.
-//   slack_docs/apis__events-api__using-socket-mode.md — Socket Mode is only for
+//   docs/slack_docs/apis__events-api__using-socket-mode.md — Socket Mode is only for
 //     RECEIVING events; outbound posting needs no app-level token.
 //
 // The Node 18+ global fetch is used; no extra dependency.
 
 import { config as loadEnv } from 'dotenv';
 loadEnv({ override: true });
+import { LABELS } from './labels.js';
 
 const SLACK_POST_URL = 'https://slack.com/api/chat.postMessage';
 
 // Map the three-label thesis vocabulary onto a readable Slack badge.
 const LABEL_BADGE = {
-  HIGH_ALERT: '🔴 HIGH ALERT',
-  MONTHLY_OVERVIEW: '🟡 MONTHLY OVERVIEW',
-  IGNORE: '⚪ IGNORE',
+  [LABELS.HIGH_ALERT]: 'HIGH ALERT',
+  [LABELS.MONTHLY_OVERVIEW]: 'MONTHLY OVERVIEW',
+  [LABELS.IGNORE]: 'IGNORE',
 };
+
+// Format an optional ticker into a Slack string, falling back when absent.
+function tickerSuffix(ticker, fallback, format) {
+  return ticker ? format(ticker) : fallback;
+}
 
 // Build a Slack Block Kit payload for a classified article. Mirrors the block
 // structure of the original Python build_alert_blocks().
 function buildAlertBlocks(article) {
-  const tickerStr = article.ticker ? ` ($${article.ticker})` : '';
+  const tickerStr = tickerSuffix(article.ticker, '', (t) => ` ($${t})`);
   const badge = LABEL_BADGE[article.classification] || article.classification;
   const blocks = [
     { type: 'divider' },
@@ -71,9 +77,9 @@ function buildAlertBlocks(article) {
 }
 
 function buildFallbackText(article) {
-  const tickerStr = article.ticker ? ` ($${article.ticker})` : '';
+  const tickerStr = tickerSuffix(article.ticker, '', (t) => ` ($${t})`);
   return (
-    `🚨 HIGH ALERT — ${article.name || article.ticker}${tickerStr}\n` +
+    `HIGH ALERT — ${article.name || article.ticker}${tickerStr}\n` +
     `${article.headline}\n` +
     `Thesis impact: ${article.rationale || '(no rationale)'}\n` +
     `Source: ${article.source || 'News'}`
@@ -94,7 +100,7 @@ export async function notifySlack(article) {
 // digest message.
 function overviewLine(article) {
   const date = (article.published_at || '').slice(0, 10);
-  const ticker = article.ticker ? `*$${article.ticker}*` : '*—*';
+  const ticker = tickerSuffix(article.ticker, '*—*', (t) => `*$${t}*`);
   const link = article.url ? `<${article.url}|${article.headline}>` : article.headline;
   const rationale = article.rationale ? ` — ${article.rationale}` : '';
   return `• \`${date}\` ${ticker}: ${link}${rationale}`;
@@ -109,7 +115,7 @@ function buildMonthlyOverviewBlocks(articles, monthLabel) {
   const blocks = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: `🗓️ Monthly Overview — ${monthLabel}`, emoji: true },
+      text: { type: 'plain_text', text: `Monthly Overview — ${monthLabel}`, emoji: true },
     },
     {
       type: 'context',

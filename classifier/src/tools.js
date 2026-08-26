@@ -1,6 +1,6 @@
 // Tools for the Classification Agent.
 //
-// Pattern from langchain_docs/oss/javascript/langchain/tools.md:
+// Pattern from docs/langchain_docs/oss/javascript/langchain/tools.md:
 //   "The simplest way to create a tool is by importing the `tool` function from
 //   the `langchain` package."  Each tool is `tool(handler, { name, description, schema })`,
 //   with snake_case names ("Sticking to alphanumeric characters, underscores, and hyphens
@@ -20,6 +20,10 @@ import {
   markClassification,
 } from './repo.js';
 import { dispatchOne } from './dispatch.js';
+import { LABEL_VALUES } from './labels.js';
+
+const DEFAULT_RECENT_LIMIT = 5;
+const MAX_RECENT_LIMIT = 25;
 
 // ─── get_thesis(ticker) ───────────────────────────────────────────────────────
 export const get_thesis = tool(
@@ -49,7 +53,7 @@ export const get_thesis = tool(
 // ─── get_recent_classifications(ticker, limit) ────────────────────────────────
 export const get_recent_classifications = tool(
   async ({ ticker, limit }) => {
-    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, 25) : 5;
+    const n = Number.isFinite(limit) && limit > 0 ? Math.min(limit, MAX_RECENT_LIMIT) : DEFAULT_RECENT_LIMIT;
     const rows = await getRecentClassifications(ticker, n);
     if (rows.length === 0) {
       return `No prior classifications for ${ticker}.`;
@@ -63,13 +67,13 @@ export const get_recent_classifications = tool(
       'Use this when you want to stay consistent with prior decisions on similar headlines.',
     schema: z.object({
       ticker: z.string().describe('The portfolio ticker, e.g. "NVDA".'),
-      limit: z.number().int().optional().describe('Max prior classifications to return. Defaults to 5.'),
+      limit: z.number().int().optional().describe(`Max prior classifications to return. Defaults to ${DEFAULT_RECENT_LIMIT}.`),
     }),
   }
 );
 
 // ─── fetch_article_body(article_id) ───────────────────────────────────────────
-// Per finnhub_docs/company-news.md the only free-tier news endpoint returns
+// Per docs/finnhub_docs/company-news.md the only free-tier news endpoint returns
 // headline + summary + url; no body field. This tool exists for the agent to
 // ASK for a body; it fails gracefully and tells the agent to decide from the
 // headline + summary already provided.
@@ -102,12 +106,10 @@ export const fetch_article_body = tool(
 );
 
 // ─── classify_article(article_id, label, rationale) ───────────────────────────
-const LABELS = ['HIGH_ALERT', 'MONTHLY_OVERVIEW', 'IGNORE'];
-
 export const classify_article = tool(
   async ({ article_id, label, rationale }) => {
-    if (!LABELS.includes(label)) {
-      return `Error: invalid label "${label}". Must be one of: ${LABELS.join(', ')}. Call classify_article again with a valid label.`;
+    if (!LABEL_VALUES.includes(label)) {
+      return `Error: invalid label "${label}". Must be one of: ${LABEL_VALUES.join(', ')}. Call classify_article again with a valid label.`;
     }
     if (!rationale || rationale.trim().length === 0) {
       return `Error: rationale is required. Call classify_article again with a non-empty rationale.`;
@@ -137,7 +139,7 @@ export const classify_article = tool(
     schema: z.object({
       article_id: z.number().int().describe('Numeric id of the article being classified.'),
       label: z
-        .enum(['HIGH_ALERT', 'MONTHLY_OVERVIEW', 'IGNORE'])
+        .enum(LABEL_VALUES)
         .describe('The classification verdict.'),
       rationale: z
         .string()
