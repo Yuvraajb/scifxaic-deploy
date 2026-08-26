@@ -26,3 +26,26 @@ services:
         sync: false
       - key: SLACK_CHANNEL_ID
         sync: false
+
+  # Frontend: Vite static build. VITE_* vars are BUILD-time — set real values in
+  # the Render dashboard before the first build; changing them requires a rebuild.
+  # The rewrite rule replaces frontend/public/_redirects (Netlify syntax, which
+  # Render ignores) so react-router deep links serve index.html.
+  - type: web
+    name: scifxaic-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_SUPABASE_URL
+        sync: false
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
