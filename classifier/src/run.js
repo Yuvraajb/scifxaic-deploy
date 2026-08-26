@@ -105,12 +105,12 @@ export async function cycle() {
   console.log(`\n── cycle start ${new Date().toISOString()} ──`);
   try {
     const inserted = await pollFinnhub();
-    const { count: classified, byLabel } = await classifyAllPending();
+    const { count: classified, byLabel, items } = await classifyAllPending();
     await dispatchAll();
     await maybeSendMonthlyOverview();
     // Heartbeat: post a per-cycle summary even when nothing was relevant, so
     // the channel itself proves each scheduled poll ran.
-    await postCycleSummary({ inserted, classified, byLabel });
+    await postCycleSummary({ inserted, classified, byLabel, items });
   } catch (e) {
     console.error('cycle error:', e);
   }
