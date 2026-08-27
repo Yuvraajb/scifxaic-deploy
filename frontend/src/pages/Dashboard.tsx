@@ -6,6 +6,7 @@ import DeckCard from '../components/DeckCard';
 import UploadModal from '../components/UploadModal';
 import SectorChangeModal from '../components/SectorChangeModal';
 import type { Deck } from '../types';
+import { deleteDeck } from '../lib/api';
 
 interface PendingMove {
   deck: Deck;
@@ -84,6 +85,18 @@ export default function Dashboard() {
     if (error) {
       // Rollback on failure
       setDecks(prev => prev.map(d => d.id === deck.id ? { ...d, sector: deck.sector } : d));
+    }
+  }
+
+  async function handleDelete(deck: Deck) {
+    // Optimistic remove; restore on failure. Other open dashboards converge
+    // via the realtime subscription.
+    setDecks(prev => prev.filter(d => d.id !== deck.id));
+    try {
+      await deleteDeck(deck.id);
+    } catch (err) {
+      setDecks(prev => [...prev, deck]);
+      alert(err instanceof Error ? err.message : 'Could not delete deck');
     }
   }
 
@@ -171,6 +184,7 @@ export default function Dashboard() {
                         key={deck.id}
                         deck={deck}
                         onDragStart={() => handleDragStart(deck)}
+                        onDelete={handleDelete}
                       />
                     ))}
                   </div>
