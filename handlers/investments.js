@@ -17,12 +17,25 @@ function buildInvestmentRow({ ticker, companyName, sector, thesis, fileUrl, slac
   };
 }
 
+// One tracker row per ticker: re-uploading a deck REPLACES the previous row
+// (mirrors the watchlist's replace-the-thesis semantics), so the dashboard
+// never shows duplicate company cards.
 async function saveInvestment(investment) {
   const row = buildInvestmentRow(investment);
-  const result = await supabase.from(INVESTMENT_TRACKER_TABLE).insert(row);
+  const normalizedTicker = row.ticker.trim().toUpperCase();
+
+  const deleteResult = await supabase
+    .from(INVESTMENT_TRACKER_TABLE)
+    .delete()
+    .ilike('ticker', normalizedTicker);
+  assertNoSupabaseError(deleteResult, 'Supabase stale-deck delete failed');
+
+  const result = await supabase
+    .from(INVESTMENT_TRACKER_TABLE)
+    .insert({ ...row, ticker: normalizedTicker });
   assertNoSupabaseError(result, 'Supabase insert failed');
 
-  return { ticker: row.ticker, thesis: row.thesis };
+  return { ticker: normalizedTicker, thesis: row.thesis };
 }
 
 module.exports = {
