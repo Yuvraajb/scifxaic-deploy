@@ -16,6 +16,7 @@ export async function downloadFile(url: string, filename: string) {
 interface Props {
   deck: Deck;
   onDragStart?: (e: React.DragEvent) => void;
+  onDelete?: (deck: Deck) => void;
 }
 
 function initials(name: string | null) {
@@ -27,7 +28,7 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function DeckCard({ deck, onDragStart }: Props) {
+export default function DeckCard({ deck, onDragStart, onDelete }: Props) {
   const [showThesis, setShowThesis] = useState(false);
   const creator = deck.deck_creator || 'Unknown';
 
@@ -86,6 +87,21 @@ export default function DeckCard({ deck, onDragStart }: Props) {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
               </svg>
               Download
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => {
+                if (window.confirm(`Delete the ${deck.ticker} deck? The classifier will stop watching ${deck.ticker} if this is its only deck.`)) {
+                  onDelete(deck);
+                }
+              }}
+              aria-label={`Delete ${deck.ticker} deck`}
+              className="py-1.5 px-2 text-xs font-medium text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
             </button>
           )}
         </div>

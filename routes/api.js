@@ -79,6 +79,56 @@ function registerApiRoutes(router) {
   });
 
   // ── POST /api/invite ──────────────────────────────────────────────────────
+  // ── DELETE /api/decks/:id ─────────────────────────────────────────────────
+  // Remove a deck end-to-end: tracker row, its storage file, and — when it was
+  // the ticker's only deck — deactivate the company so the classifier stops
+  // watching it (mirror of the upload path's safeAddToWatchlist). Company and
+  // articles are kept (active=false) so classification history stays intact.
+  router.delete('/api/decks/:id', requireAuth, async (req, res) => {
+    try {
+      const { data: deck, error: loadErr } = await supabaseAdmin
+        .from('investment_tracker')
+        .select('id, ticker, file_url')
+        .eq('id', req.params.id)
+        .maybeSingle();
+      if (loadErr) throw loadErr;
+      if (!deck) return res.status(404).json({ error: 'Deck not found' });
+
+      const { error: delErr } = await supabaseAdmin
+        .from('investment_tracker')
+        .delete()
+        .eq('id', deck.id);
+      if (delErr) throw delErr;
+
+      // Best-effort: remove the stored file. The public URL ends with the
+      // storage path after "/pitch-decks/".
+      if (deck.file_url) {
+        const storagePath = deck.file_url.split('/pitch-decks/').pop();
+        if (storagePath) {
+          const { error: fileErr } = await supabaseAdmin.storage
+            .from('pitch-decks')
+            .remove([storagePath]);
+          if (fileErr) console.warn('[DECK DELETE] file removal failed:', fileErr.message);
+        }
+      }
+
+      // Stop watching the company if no deck remains for its ticker.
+      const ticker = deck.ticker.trim().toUpperCase();
+      const { count } = await supabaseAdmin
+        .from('investment_tracker')
+        .select('*', { count: 'exact', head: true })
+        .ilike('ticker', ticker);
+      if (count === 0) {
+        await supabaseAdmin.from('companies').update({ active: false }).eq('ticker', ticker);
+      }
+
+      res.json({ ok: true, ticker, unwatched: count === 0 });
+    } catch (err) {
+      console.error('[DECK DELETE ERROR]', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.post('/api/invite', requireAuth, requireGod, async (req, res) => {
     try {
       const { email, name, slackUserId, password } = req.body;

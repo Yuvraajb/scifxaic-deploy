@@ -58,3 +58,13 @@ export async function updateUserSectors(id: string, sectors: string[]) {
   });
   if (!res.ok) throw new Error('Failed to update sectors');
 }
+
+export async function deleteDeck(id: number | string): Promise<{ ok: boolean; ticker: string }> {
+  const headers = await authHeaders();
+  const res = await fetch(`${BASE}/api/decks/${id}`, { method: 'DELETE', headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+    throw new Error(err.error || 'Delete failed');
+  }
+  return res.json();
+}
